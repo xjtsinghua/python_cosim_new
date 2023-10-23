@@ -1,0 +1,7 @@
+grpcio==1.51.3
+grpcio-tools==1.51.3
+protobuf==4.22.0
+google-api-python-client==2.80.0
+gcloud==0.18.3
+protoc-gen-validate==1.0.1
+openapi3==1.7.0
