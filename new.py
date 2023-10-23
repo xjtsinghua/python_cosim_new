@@ -349,7 +349,7 @@ class Cosim():
                     if not self.vehicle_id_list_new:#todo 找最近10辆控制车
                         ctrl_vehs = []
                         ctrl_l_list,ctrl_f_list = get_ctrl_vehs(all_vehs_pos)
-                        self.vehicle_id_list_new = self.vehicle_id_list #+ ctrl_l_list
+                        self.vehicle_id_list_new = self.vehicle_id_list + ctrl_l_list
                         for veh in self.vehicle_id_list_new:
                             vehicle = stub.GetVehicle(simulation_pb2.GetVehicleReq(simulation_id=self.simulation_id, vehicle_id=veh), metadata=self.metadata)
                             veh_info=dict(Length=vehicle.vehicle.info.base_info.Length,Width=vehicle.vehicle.info.base_info.Width,Weight=vehicle.vehicle.info.base_info.Weight,
@@ -669,8 +669,8 @@ def render(frame:Surr,eval_value,ego_name: str = None):
     plt.axis('equal')
 
 if __name__ == '__main__':
-    # Cosim().run()
-    Cosim().load_pkl()
+    Cosim().run()
+    # Cosim().load_pkl()
     def test_eval_value(Surr):
         import matplotlib.pyplot as plt
         import numpy as np
