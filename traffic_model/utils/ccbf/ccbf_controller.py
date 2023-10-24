@@ -1682,14 +1682,16 @@ class CCBF_Controller(object):
             self.cbf_on = False
         if True:
         # else:
-            input_val = self.cbf_col_avoid_cont_law(self._current_x, self._current_y, self._current_yaw, 0.01 if self._current_vx-v_l==0 else max(self._current_vx-v_l,min((-8+0.5*x_max_n),-6)), self._current_vy, self._current_omega, x_max_n)
+            input_val = self.cbf_col_avoid_cont_law(self._current_x, self._current_y, self._current_yaw, 0.01 if self._current_vx-v_l==0
+            else max(self._current_vx-v_l,min((-8+0.5*x_max_n),-6)), self._current_vy, self._current_omega, x_max_n)
             end_lambdify_eval = time.time()
             print(f'***********input_val:{input_val}')
             print(f'*********time for lambdify function: {end_lambdify_eval-start_lambdify_eval}' )
             print("grad_h: ", grad_h,',grad LfV:', grad1_h,",h value: ", h_value)
 
             self.throttle_cbf=input_val[0]
-            self.throttle=(x_max_n/30)*self.throttle_clf+self.throttle_cbf
+            try:self.throttle=round(x_max_n/30,2)*self.throttle_clf+self.throttle_cbf
+            except Exception:print(Exception,self.throttle_clf,x_max_n)
             # self.steer = np.fmax(np.fmin(input_val[1], max_steer), min_steer)
             # self.steer = input_val[1] # 차선책
             self.cbf_on = True
@@ -2297,7 +2299,7 @@ if __name__=='__main__':
     import csv
     def file_test():
         document_name = '../../../projects/csv'
-        csv_name = 'clbf_ctrl_values4_只考虑重构相对速度_改cbf函数c.csv'
+        csv_name = 'clbf_ctrl_values4_1025_横坐标相对距离.csv'
         from traffic_model.utils.ccbf import  CCBFOption, VehicleSpec
         ccbf_controller = CCBF_Controller(VehicleSpec())
         (P1, P2, P3, P4, P5, P6) = CCBFOption.weight
@@ -2305,7 +2307,7 @@ if __name__=='__main__':
         def data_save():
             def test_clbf(v_a,x_l,v_l=0):
                 ccbf_controller.update_values(0, 20, 0, v_a, 0,0)#x, y, yaw, vx, vy, omega
-                path2 = [np.arange(0, 20, 0.5),np.ones(40)*20,np.zeros(40),np.ones(40)*15 ]
+                path2 = [np.arange(0, 20, 0.5),np.ones(40)*20,np.zeros(40),np.ones(40)*22 ]
                 ccbf_controller.update_waypoints(path2)
                 accel_clf = ccbf_controller.construct_clf_sep(k=1,slack_variable=2000)
                 car_leader=dict(x=x_l,y=20)
@@ -2315,26 +2317,26 @@ if __name__=='__main__':
                 accel_final=ccbf_controller.throttle
                 print(f'accel_cbf:{accel_final}')
                 return accel_final,accel_clf,accel_cbf
-            v_a_list = np.arange(2, 18, 2)
-            v_l_list = np.arange(2, 18, 2)
-            x_list = np.arange(2, 34, 2)
+            v_a_list = np.arange(2, 24, 2)
+            v_l_list = np.arange(2, 34, 2)
+            x_list = np.arange(6.5, 36.5, 2)
             acc_list=[]
 
             for v_a in v_a_list:
-                # for v_l in v_l_list:
-                #     for x_rel in x_list:
-                for x_l in x_list:
-                    for v_l in v_l_list:
+                for v_l in v_l_list:
+                    for x_l in x_list:
+                # for x_l in x_list:
+                #     for v_l in v_l_list:
                         accel_final,accel_clf,accel_cbf=test_clbf(v_a,x_l,v_l)
                         # acc_dict={'v_a': v_a,  'x_rel': x_rel,'v_l': v_l, 'accel_final': accel_final,'accel_clf': accel_clf,'accel_cbf': accel_cbf}
-                        acc_list.append([v_a,x_l,v_l,accel_final[0],x_l-4.5,accel_clf,accel_cbf])          #[v_a,v_l,x_rel,accel_cbf]
+                        acc_list.append([v_a,x_l,v_l,accel_final[0],x_l-4.5,v_a-v_l,accel_clf,accel_cbf])          #[v_a,v_l,x_rel,accel_cbf]
 
 
             # os.makedirs(document_name)
             if True:
                 with open(os.path.join(document_name, csv_name), mode='w', newline='') as file:
                     writer = csv.writer(file)
-                    writer.writerow(['v_a','x_rel','v_l','acc','x_real','acc_clf','acc_cbf'])        #['v_a','x_real','acc']
+                    writer.writerow(['v_a','x_rel','v_l','acc','x_real','v_rel','acc_clf','acc_cbf'])        #['v_a','x_real','acc']
                     writer.writerows(acc_list)
             return acc_list
         def plot_values(acc_list=[]):
@@ -2349,26 +2351,30 @@ if __name__=='__main__':
             def from_local():
                 return np.array(acc_list).T
                 print(acc_list[:6])
-            acc_mat=read_csv()
-            fig=plt.figure(figsize=(6,6))
+            # acc_mat=from_local()
+            acc_mat = read_csv()
+            fig=plt.figure(figsize=(10,6))
 
             def plot_l():
-                plt.scatter(acc_mat[1][:16],acc_mat[3][:16],label='相对距离关系')
-                plt.xlabel('相对距离 [m]')
+                for i in range(16):
+                    bias,interval=15*16*5,15
+                    plt.plot(acc_mat[4][bias+interval*i:bias+interval*(i+1)],[np.clip(float(item),-7,2.5) for item in acc_mat[3]][bias+interval*i:bias+interval*(i+1)],label=f'相对距离关系_相对速度为{float(acc_mat[5][bias+interval*i])}m/s',color=plt.cm.Set3(i))
+                    plt.xlabel('相对距离 [m]')
             def plot_v():
                 for i in range(10):
-                    plt.plot(acc_mat[2][8*i:8*(i+1)], [float(item) for item in acc_mat[3]][8*i:8*(i+1)],label=f'相对速度关系_车距为{(i+1)*2}m,自车速度为{acc_mat[0][8*i]}m/s')
+                    plt.plot(acc_mat[2][8*i:8*(i+1)], [np.clip(float(item),-7,2.5) for item in acc_mat[3]][8*i:8*(i+1)],label=f'相对速度关系_车距为{acc_mat[4][8*i]}m,自车速度为{acc_mat[0][8*i]}m/s')
                     plt.xlabel('前车速度[m/s]')
-            plot_v()
+            plot_l()
             plt.ylabel('加速度 [m/s^2]')
             plt.legend()
             jpg_name=csv_name.split('.')[0]+'.jpg'
             plt.grid()
             plt.savefig(os.path.join(document_name,jpg_name))
             plt.show()
-
-        # acc_list=data_save()
-        plot_values()
+        if False:
+            acc_list=data_save()
+            plot_values(acc_list)
+        else:plot_values()
     file_test()
 
 
