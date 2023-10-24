@@ -10,10 +10,10 @@ from dataclasses import dataclass
 model_params= dict(
     target_v=15,           #期望速度
     bias_lat_miu=0,        #纵向位置偏差均值
-    bias_lat_var=0.3,      #纵向位置偏差方差
-    bias_v_miu=0,        #纵向位置偏差均值
-    bias_v_var=0.5,      #纵向位置偏差方差
-    driver_nou=1,          #驾驶员激进系数（增大），期望速度（变大），期望间距（变小），转向期望间距（变小）
+    bias_lat_var=0.2,      #纵向位置偏差方差
+    bias_v_miu=0,        #纵向速度偏差均值
+    bias_v_var=0.5,      #纵向速度偏差方差
+    driver_nou=1    #random.randint(1,10)*0.1,          #驾驶员激进系数（增大），期望速度（变大），期望间距（变小），转向期望间距（变小）
 )       #6个参数
 
 driver_delay=min(1/model_params['driver_nou'],3),  #驾驶员反应时间
@@ -23,7 +23,8 @@ driver_delay=min(1/model_params['driver_nou'],3),  #驾驶员反应时间
 class Surr(object):
     def __init__(self,id,vehicle):
         self.id=id
-        self.lane_change_time,self.lane_change_times,self.LC_desir_time=0,0,0
+        self.d=3.2
+        self.lane_change_time,self.lane_change_times,self.LC_desir_time,self.v_A,self.J_max_id=0,0,0,0,0
         self.Length,self.Width,self.Weight=vehicle['Length'],vehicle['Width'],vehicle['Weight']     #传vehicle信息，改车的长宽质量
         self.max_dec,self.max_acc,self.x,self.y,self.phi,self.u,self.acc_lon,self.lane_rad,self.dis_to_link_end,self.selected_path_id=vehicle['max_dec'],vehicle['max_acc'],0,0,0,0,0,0,0,0
         self.static_path,self.all_veh_info=[],[]
@@ -36,14 +37,13 @@ class Surr(object):
         self.bias_lat = random.gauss(model_params['bias_lat_miu'], model_params['bias_lat_var'])  # 驾驶道路中心线横向偏差
         self.bias_v = random.gauss(model_params['bias_v_miu'], model_params['bias_v_var'])  # 驾驶道路速度偏差
 
-    def update(self,all_veh_info:list,vehicle:object,nearest_veh_id_around:list,y_list):
+    def update(self,all_veh_info:list,vehicle:object,nearest_veh_id_around:list,static_paths):
         '''
 
         :return:
         '''
         self.all_veh_info = all_veh_info
         self.lane_change_time+=1
-        self.d=abs(y_list[0]-y_list[1])              #车道宽度,abs(y_list[0]-y_list[1]),3.2m
         self.x=vehicle.moving_info.position.point.x
         self.y=vehicle.moving_info.position.point.y
         self.phi=vehicle.moving_info.position.phi
@@ -53,20 +53,20 @@ class Surr(object):
         self.link_id=vehicle.moving_info.position.link_id
         self.dis_to_link_end=vehicle.moving_info.position.dis_to_link_end
         print(f'x:{self.x},y:{self.y},u:{self.u},phi:{self.phi},cl_time:{self.lane_change_time},lane_id:{self.lane_id}')
-        self.static_path=vehicle.static_path
-        self.static_path_match(y_list)
-        self.lane_rad=self.cul_lane_rad()
-        vehs_relation=self.find_vehs(nearest_veh_id_around,y_list)
+        self.static_path=static_paths
+        self.static_path_match_new()
+        self.lane_rad=self.cul_lane_rad()  #todo 用道路中心线计算
+        vehs_relation=self.find_vehs(nearest_veh_id_around)
         i_behavior=1
         if i_behavior==1:
             eval_value=self.eval_function()
         else:
             self.selected_path_id=self.get_path_id(i_behavior)
         ref_path=self.matched_static_path_array[self.selected_path_id]
-        v_A = self.get_track_speed()
-        new_ref_path = self.gen_new_static_path(ref_path, v_A,0)
-        print(f"new_ref_path_x:{new_ref_path[0][0]},new_ref_path_y:{new_ref_path[1][0]},静态路径数量：{len(self.static_path)}")
-        control_value=self.ccbf_controler(new_ref_path)
+        self.v_A = self.get_track_speed()
+        new_ref_path = self.gen_new_static_path(ref_path, target_v=self.v_A,target_phi=0)
+        print(f"new_ref_path_x:{new_ref_path[0][0]},new_ref_path_y:{new_ref_path[1][0]},静态路径数量：{len(self.static_path.data)}")
+        control_value=self.ccbf_controler(new_ref_path) if len(new_ref_path[0])>2 else [[0],[0]]
         self.reset()
         return {'control_value':control_value,'eval_value':eval_value,'vehs_relation':vehs_relation}
 
@@ -75,6 +75,20 @@ class Surr(object):
         self.matched_static_path_array.clear()
         self.matched_static_path_veh.clear()
 
+    def construct_cpath(self):
+        #当前所在车道号，静态路径对应车道号，补充当前车道号静态路径
+        spath_idx=list(self.matched_static_path_array.keys())[0]
+        if spath_idx>int(self.lane_id[-1]):
+            self.matched_static_path_array[int(self.lane_id[-1])] = [np.array([p - 3.2 * math.sin(self.lane_rad) for p in item]) if key == 0 else np.array([p + 3.2 * math.cos(self.lane_rad) for p in item])
+                                                            for key,item in enumerate(list(self.matched_static_path_array.values())[0])]
+        elif spath_idx<int(self.lane_id[-1]):
+            self.matched_static_path_array[int(self.lane_id[-1])] = [np.array([p + 3.2 * math.sin(self.lane_rad) for p in item]) if key == 0 else np.array([p - 3.2 * math.cos(self.lane_rad) for p in item])
+                                                            for key, item in enumerate(list(self.matched_static_path_array.values())[0])]
+        else:
+            if spath_idx==3:self.matched_static_path_array[2] = [np.array([p - 3.2 * math.sin(self.lane_rad) for p in item]) if key == 0 else np.array([p + 3.2 * math.cos(self.lane_rad) for p in item])
+                                                            for key,item in enumerate(list(self.matched_static_path_array.values())[0])]
+            if spath_idx==1:self.matched_static_path_array[2] = [np.array([p + 3.2 * math.sin(self.lane_rad) for p in item]) if key == 0 else np.array([p - 3.2 * math.cos(self.lane_rad) for p in item])
+                                                            for key, item in enumerate(list(self.matched_static_path_array.values())[0])]
     def get_path_id(self,i_behavior):
         if i_behavior==2:#右侧超车:1.判断与前车距离在阈值范围内，前车速度低于0.5倍限速即40km/h 2.选择的路径为当前路径的右侧 3.换道到右侧后，加速，等换道到左侧的条件， 4.选择当前路径的左侧
             if True:self.selected_path_id=int(self.lane_id[-1])+1
@@ -82,39 +96,48 @@ class Surr(object):
 
 
     def cul_lane_rad(self):
-        waypoints = self.matched_static_path[2]
+        waypoints = list(self.matched_static_path.values())[0]
+        print('waypoins长度：',len(waypoints))
         cosest_idx = min(range(len(waypoints)), key=lambda closest_idx: math.sqrt(
             (waypoints[closest_idx].x - self.x) ** 2 + (waypoints[closest_idx].y - self.y) ** 2))
         waypoints = waypoints[cosest_idx:cosest_idx + 41]
-        lane_rad = math.atan((waypoints[2].y - waypoints[0].y) / (waypoints[2].x - waypoints[0].x))
-        lane_rad2deg = lane_rad * 180 / math.pi
-        if waypoints[2].y - waypoints[0].y > 0:
-            up = True
-        else:
-            up = False
-        if waypoints[2].x - waypoints[0].x > 0:
-            right = True
-        else:
-            right = False
-        if up and not right: lane_rad = lane_rad + math.pi
-        if not up and not right: lane_rad = lane_rad + math.pi
-        if not up and right: lane_rad = lane_rad + math.pi * 2
-        return lane_rad # unit is rad
+        try:
+            lane_rad = math.atan((waypoints[2].y - waypoints[0].y) / (waypoints[2].x - waypoints[0].x))
+            lane_rad2deg = lane_rad * 180 / math.pi
+            if waypoints[2].y - waypoints[0].y > 0:
+                up = True
+            else:
+                up = False
+            if waypoints[2].x - waypoints[0].x > 0:
+                right = True
+            else:
+                right = False
+            if up and not right: lane_rad = lane_rad + math.pi
+            if not up and not right: lane_rad = lane_rad + math.pi
+            if not up and right: lane_rad = lane_rad + math.pi * 2
+            return lane_rad # unit is rad
+        except:return self.lane_rad # unit is rad
 
-    def find_vehs(self,vehs_list,y_list):
 
+    def find_vehs(self,vehs_list):
+        #1.通过静态路径中（x,y）和车辆（x,y）距离最小判断车辆属于哪条静态路径
         nearest_vehs=[self.get_veh_info_from_traffic(veh_id) for veh_id in vehs_list]
-        vehs_1l,vehs_2l,vehs_3l,vehs_1f,vehs_2f,vehs_3f=[],[],[],[],[],[]
-        vehs_d = dict(v1l=vehs_1l,v2l=vehs_2l,v3l=vehs_3l,v1f=vehs_1f,v2f=vehs_2f,v3f=vehs_3f)
-        def cul_min_dis(idx):
-            if veh['dis_to_link'] >self.dis_to_link_end:return abs((y_list[idx] - math.sin(self.lane_rad) * abs(self.dis_to_link_end - veh['dis_to_link'])) - veh['y'])
-            else:return abs((y_list[idx] + math.sin(self.lane_rad) * abs(self.dis_to_link_end - veh['dis_to_link'])) - veh['y'])
-
+        vehs_d = dict(v1l=[],v2l=[],v3l=[],v1f=[],v2f=[],v3f=[])
+        self.get_xy_translane()
+        def get_d(idx):
+            x0=self.xy_lane[idx]['x']
+            y0=self.xy_lane[idx]['y']
+            b=y0-np.tan(self.lane_rad)*x0
+            return abs(-np.tan(self.lane_rad)*veh['x']+veh['y']-b)/np.sqrt(np.tan(self.lane_rad)**2+1)  #距离
         for veh in nearest_vehs:
-            idx_cul=min(range(len(y_list)),key=lambda idx:cul_min_dis(idx))+1
-            idx=int(veh['lane_id'][-1])
-            # assert idx_cul==idx,'idx_cul:{} is not equal to idx:{}'.format(idx_cul,idx)
-            vehs_l,vehs_f=vehs_d[f'v{idx_cul}l'],vehs_d[f'v{idx_cul}f']
+            #todo 不能使用自车的静态路径keys
+            idx_=int(veh['lane_id'][-1])
+            if idx_==int(self.lane_id[-1]):
+                idx = min(list(self.xy_lane.keys()), key=lambda idx: get_d(idx))
+            elif get_d(int(self.lane_id[-1]))<1.8 and idx_!=int(self.lane_id[-1]):idx=int(self.lane_id[-1])
+            else:idx=idx_
+
+            vehs_l,vehs_f=vehs_d[f'v{idx}l'],vehs_d[f'v{idx}f']
             if veh['dis_to_link'] >self.dis_to_link_end:exec('vehs.append(value)',{'vehs':vehs_f,'value':veh})
             else:exec('vehs.append(value)',{'vehs':vehs_l,'value':veh})
             vehs_l, vehs_f = [], []
@@ -123,6 +146,24 @@ class Surr(object):
         self.matched_static_path_veh={1:[vehs_d['v1l'],vehs_d['v1f']],2:[vehs_d['v2l'],vehs_d['v2f']],3:[vehs_d['v3l'],vehs_d['v3f']]}
         print(f'vehs_relation:{vehs_d}')
         return vehs_d
+    def select_leader(self):
+        #1.当前车道和其他车道的前车进行距离比较，2.其他车道的前车如果abs(phi)>0.2，将该前车放到候选列表，3.将候选列表中的前车与当前车道前车比较，选择离自车最近的
+        veh_list=[]
+        leader=self.matched_static_path_veh[int(self.lane_id[-1])][0]
+        leader_candi=[item[0] for key,item in self.matched_static_path_veh.items() if key != int(self.lane_id[-1]) ]
+        for veh in leader_candi:
+            if isinstance(veh, list):continue
+            if isinstance(leader,dict):
+                if abs(veh['phi']) > 0.2 and veh['dis_to_link'] > leader['dis_to_link']:veh_list.append(veh)
+            else:
+                if abs(veh['phi']) > 0.2 :veh_list.append(veh)
+        if len(veh_list)>=1:
+            max_item=max(veh_list,key=lambda x:x['dis_to_link'])
+            return max_item
+        else:return leader
+
+
+
     def static_path_match(self,y_list):
         static_path=copy.deepcopy(self.static_path[0].point)
         closest_idx = min(range(len(static_path)), key=lambda closest_idx: abs(static_path[closest_idx].x - self.x))
@@ -131,6 +172,17 @@ class Surr(object):
             if (self.lane_id[-1]=='1' and i==2) or (self.lane_id[-1]=='3' and i==0):continue #1号车道时，不需要评估3号车道路径，3号车道时，不需要1号车道路径
             self.matched_static_path[i + 1] = self.static_path[idx].point[closest_idx:closest_idx+min(41,len(self.static_path[idx].point)-closest_idx)]
             self.matched_static_path_array[i+1] =self.out_static_path(self.matched_static_path[i + 1])
+
+    def static_path_match_new(self):
+        #1.静态路径的point，2.循环取每条路径的path_id,将id最后1位转为Int，3.构建字典
+        static_path = copy.deepcopy(self.static_path.data[0].lines[0].Points)
+        closest_idx = min(range(len(static_path)), key=lambda closest_idx: abs(static_path[closest_idx].x - self.x))
+        for path_tuple in [(item.lines[0].Points, item.lines[0].path_id) for item in self.static_path.data]:
+            if (self.lane_id[-1] == '1' and path_tuple[1][-1]== '3') or (
+                        self.lane_id[-1] == '3' and path_tuple[1][-1] == '1'): continue  # 1号车道时，不需要评估3号车道路径，3号车道时，不需要1号车道路径
+            self.matched_static_path[int(path_tuple[1][-1])] = path_tuple[0][closest_idx:closest_idx + min(41, len(
+                    path_tuple[0]) - closest_idx)]
+            self.matched_static_path_array[int(path_tuple[1][-1])] = self.out_static_path(self.matched_static_path[int(path_tuple[1][-1])])
 
     def out_static_path(self,path_raw):
         path,x_list,y_list=[[],[]],[],[]
@@ -145,35 +197,42 @@ class Surr(object):
 
     def eval_function(self):
         J_value,val_safe_d,val_traffic_d={},{},{}
+        safe_base=0.6
+        if len(self.matched_static_path_array) == 1:self.construct_cpath()
+        def is_LC_complete():
+            if self.J_max_id != int(self.lane_id[-1]) and self.old_lane_id == '': self.old_lane_id = int( self.lane_id[-1])  # 有换道动机
+            if int(self.lane_id[-1])!=self.old_lane_id and isinstance(self.old_lane_id,int):#实际换道后时间清零
+                self.lane_change_time = 0
+                self.lane_change_times += 1
+                self.old_lane_id = ''
+        def LC_safe_judge():
+            for idx, path in self.matched_static_path_array.items():  # 风险评估
+                val_safe_d[idx] = self.safe_evaluation(idx, self.matched_static_path_veh[idx])
+            if val_safe_d[self.J_max_id]<safe_base and isinstance(self.old_lane_id,int):self.selected_path_id=self.old_lane_id #换道不安全，不换道
 
         if self.lane_change_times==0 or self.lane_change_time>15 :#换道后，time置为0，不评估静态路径，每次time累加1，到20以后再评估静态路径
-            for idx, path in self.matched_static_path.items():  # self.cul_real_dis可以计算与前车的实际距离
+            for idx, path in self.matched_static_path_array.items():  # self.cul_real_dis可以计算与前车的实际距离
                 val_safe = self.safe_evaluation(idx, self.matched_static_path_veh[idx])
                 val_traffic = self.traffic_evaluation(self.matched_static_path_veh[idx])    #todo safe,<1时都归零，
                 J_value[idx], val_safe_d[idx], val_traffic_d[idx] = val_safe + val_traffic, val_safe, val_traffic
                 print(f'idx:{idx},val_safe:{val_safe},val_traffic:{val_traffic}')   #todo condition,加一个累积时间1s,以后考虑相同激进系数，不同类别阈值
             J_max_id = max(list(J_value.keys()), key=lambda index: J_value[index])
+            self.J_max_id=J_max_id
+            e_delta=(1-model_params['driver_nou'])*0.15+0.1    #激进驾驶员也需要添加阈值
+            # assert len(J_value)>=2,f'评估值{J_value}'
 
-            if (J_value[J_max_id] - J_value[int(self.lane_id[-1])]) / J_value[int(self.lane_id[-1])] > 0.1 :#0.3，换道效益提高阈值
-                self.LC_desir_time+=1
+            if (J_value[J_max_id] - J_value[int(self.lane_id[-1])]) / J_value[int(self.lane_id[-1])] > e_delta :#0.3，换道效益提高阈值
                 if self.lane_change_times == 0: self.selected_path_id = J_max_id
-                elif self.LC_desir_time>5:
+                else:self.LC_desir_time+=1
+                if self.LC_desir_time>5:
                     self.selected_path_id = J_max_id    #10
                     self.LC_desir_time = 0
-                print(f'效益提升累计时间{self.LC_desir_time}')
             else:
-                if J_max_id !=int(self.lane_id[-1]):self.LC_desir_time = 0
+                # if J_max_id !=int(self.lane_id[-1]):
+                self.LC_desir_time = 0
                 if self.lane_change_times == 0: self.selected_path_id = int(self.lane_id[-1])
-        else:
-            for idx, path in self.matched_static_path.items():  # self.cul_real_dis可以计算与前车的实际距离
-                val_safe_d[idx] = self.safe_evaluation(idx, self.matched_static_path_veh[idx])
-
-        if self.selected_path_id!=int(self.lane_id[-1]) and self.old_lane_id=='':self.old_lane_id=int(self.lane_id[-1])
-        if val_safe_d[self.selected_path_id]<0.5 and isinstance(self.old_lane_id,int):self.selected_path_id=self.old_lane_id
-        if int(self.lane_id[-1])!=self.old_lane_id and isinstance(self.old_lane_id,int):#实际换道后时间清零
-            self.lane_change_time = 0
-            self.lane_change_times += 1
-            self.old_lane_id = ''
+        else:LC_safe_judge()
+        is_LC_complete()#是否换道
 
         print(f'评估函数值{J_value},选择静态路径索引{self.selected_path_id},lane_change_time:{self.lane_change_time},换道次数：{self.lane_change_times},效益提升累计时间：{self.LC_desir_time}')
         return {'J_value':J_value,'val_safe':val_safe_d,'val_traffic':val_traffic_d,'lane_change_times':self.lane_change_times}
@@ -194,9 +253,11 @@ class Surr(object):
         junction_id=veh_info.moving_info.position.junction_id
         return dict(id=veh_id,x=x,y=y,lane_id=lane_id,dis_to_link=dis_to_link,Length=Length,Width=Width,phi= phi,u=u,lon_acc= lon_acc,junction_id= junction_id)
     def get_track_speed(self):#todo 留速度，加一个速度偏置
-        v_static_path = model_params['target_v'] * model_params['driver_nou']
+        v_static_path = model_params['target_v'] -0.1*model_params['target_v']*(1-model_params['driver_nou'])
         v_A = v_static_path + self.bias_v
         print('v_static_path={:<2.2f} bias_v={:<2.2f} v_A={:<2.2f}'.format(v_static_path,self.bias_v,v_A))
+        # v_A=0 if self.dis_to_link_end<100 else min((self.dis_to_link_end-100)/30,1)*v_A
+        if self.dis_to_link_end<30: v_A = max(((self.dis_to_link_end-5)  / 30) * v_A,0)
         return v_A
 
     def gen_new_static_path(self, path, target_v, target_phi):#todo 加一个横向偏置
@@ -216,26 +277,28 @@ class Surr(object):
         tansfered_path.append(new_ref_path[2])
         tansfered_path.append(new_ref_path[3])
         return tansfered_path
-
+    #todo 在matlab中测试phi的值
     def ccbf_controler(self,static_paths):
         if abs(self.lane_rad - 2 * math.pi) * 180 / math.pi < 0.2 or abs(self.lane_rad * 180 / math.pi < 0.2):self.lane_rad = 0
         new_phi = self.phi - self.lane_rad
-        print(f"new_phi:{new_phi}")
+        print(f"new_phi:{new_phi},世界坐标phi:{self.phi},道路朝向:{self.lane_rad}")
         transfered_path = self.transfer_path(static_paths, self.lane_rad)
         print(f"new_path_x:{transfered_path[0][0]},new_path_y:{transfered_path[1][0]}")
         v,w = 0,0
         self.ccbf_controller.update_values(0, 0, new_phi, self.u, v, w)
         self.ccbf_controller.update_waypoints(transfered_path)
         self.ccbf_controller.construct_clf_sep()
-        car_leader = self.matched_static_path_veh[int(self.lane_id[-1])][0]
+        car_leader=self.select_leader()
         if car_leader:
             front_veh_x, front_veh_y=world_to_self_car(car_leader['x'], car_leader['y'], self.x, self.y, self.lane_rad)
             print(f'前车转换后坐标x:{front_veh_x}')
             front_veh_real_x=front_veh_x-0.5*(car_leader['Length']+self.Length)
             accel_cbf=self.ccbf_controller.construct_cbf_front_veh(front_veh_real_x,v_l=car_leader['u'])   #前方有车时，控制刹车的控制量
         else:
-            accel_cbf = [0]
+            # if self.dis_to_link_end < 10: accel_cbf = self.ccbf_controller.construct_cbf_front_veh(self.dis_to_link_end+2, v_l=0)
+            # else:accel_cbf = self.ccbf_controller.construct_cbf_front_veh(50, v_l=self.v_A)
             accel_cbf = self.ccbf_controller.construct_cbf_front_veh(50, v_l=30)
+
         accel,steer = self.ccbf_controller.throttle,self.ccbf_controller.steer
         control_bound: tuple = ((-0.4, -self.max_dec), (0.4, self.max_acc))# lower bound -0.4（右转向22度）,-7 为车辆的一般减速度    # upper bound 0.4（左转向22度）， 2.5
         accel,accel_cbf = np.clip(accel, control_bound[0][1], control_bound[1][1]),np.clip(accel_cbf, control_bound[0][1], control_bound[1][1])
@@ -251,16 +314,18 @@ class Surr(object):
             safe_value = (2.3 - risk) / 2.3
         else:safe_value = 1
         return safe_value
-    def get_xy_translane(self,idx):
+    def get_xy_translane(self,idx=2):
         lane_idx=int(self.lane_id[-1])
         if lane_idx == 1:
             self.xy_lane[1] = {'x':self.x,'y': self.y}
             self.xy_lane[2] = {'x':self.x+self.d*math.sin(self.lane_rad),'y':self.y-self.d*math.cos(self.lane_rad)}
+            self.xy_lane[3] = {'x': self.x + 2*self.d * math.sin(self.lane_rad),'y': self.y - 2*self.d * math.cos(self.lane_rad)}
         if lane_idx == 2:
             self.xy_lane[1] = {'x':self.x-self.d*math.sin(self.lane_rad),'y':self.y+self.d*math.cos(self.lane_rad)}
             self.xy_lane[2] = {'x':self.x,'y': self.y}
             self.xy_lane[3] = {'x':self.x+self.d*math.sin(self.lane_rad),'y':self.y-self.d*math.cos(self.lane_rad)}
         if lane_idx == 3:
+            self.xy_lane[1] = {'x': self.x - 2*self.d * math.sin(self.lane_rad), 'y': self.y + 2*self.d * math.cos(self.lane_rad)}
             self.xy_lane[2] = {'x':self.x-self.d*math.sin(self.lane_rad),'y': self.y+self.d*math.cos(self.lane_rad)}
             self.xy_lane[3] = {'x':self.x,'y': self.y}
         return self.xy_lane[idx]
@@ -276,7 +341,7 @@ class Surr(object):
         # [step 1] set static parameters (only once)
         podar.add_ego(name=self.id, length=l, width=w, mass=ms1, max_dece=md)
         # [step 2] set dynamic information
-        xy=self.get_xy_translane(idx)
+        xy=self.xy_lane[idx]
         print(f'xy:{xy},idx:{idx}')         #todo　平移时
         podar.update_ego(name=self.id, x0=xy['x'], y0=xy['y'], speed=u, phi0=phi, a0=acc_lon,length=(u / 22) * 10+l if idx!=int(self.lane_id[-1]) else l)
         risk = self.cul_risk( podar, ov_concern)
@@ -294,7 +359,7 @@ class Surr(object):
         return risk
 
     def traffic_evaluation(self, vehs_relation:list):
-        v_d = model_params['target_v'] * model_params['driver_nou']
+        v_d = model_params['target_v'] - 0.1 * model_params['target_v'] * (1 - model_params['driver_nou'])
         car_leader = vehs_relation[0]
         if car_leader:
             length_leader = car_leader['Length']
@@ -317,7 +382,7 @@ class Surr(object):
         return traffic_value
 @dataclass
 class Cosim():
-    token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEzLCJvaWQiOjEwMSwibmFtZSI6IueGiuadsCIsImlkZW50aXR5Ijoibm9ybWFsIiwicGVybWlzc2lvbnMiOlsidGFzay50YXNrLnB1YmxpYy5BQ1RJT05fVklFVyIsInRhc2sudGFzay5wdWJsaWMuQUNUSU9OX0NPUFkiLCJ0YXNrLnRhc2sucHVibGljLkFDVElPTl9SRVBMQVkiLCJ0YXNrLnRhc2sucHVibGljLkFDVElPTl9SRVBPUlQiLCJ0YXNrLnRhc2sucHJpdmF0ZS5BQ1RJT05fVklFVyIsInRhc2sudGFzay5wcml2YXRlLkFDVElPTl9BREQiLCJ0YXNrLnRhc2sucHJpdmF0ZS5BQ1RJT05fQ09QWSIsInRhc2sudGFzay5wcml2YXRlLkFDVElPTl9ERUxFVEUiLCJ0YXNrLnRhc2sucHJpdmF0ZS5BQ1RJT05fUkVQTEFZIiwidGFzay50YXNrLnByaXZhdGUuQUNUSU9OX1JFUE9SVCIsInRhc2sudGFzay5wZXJzb25hbC5BQ1RJT05fVklFVyIsInRhc2sudGFzay5wZXJzb25hbC5BQ1RJT05fREVMRVRFIiwidGFzay50YXNrLnBlcnNvbmFsLkFDVElPTl9SRVBMQVkiLCJ0YXNrLnRhc2sucGVyc29uYWwuQUNUSU9OX1JFUE9SVCIsInJlc291cmNlLnZlaGljbGUucHVibGljLkFDVElPTl9WSUVXIiwicmVzb3VyY2UudmVoaWNsZS5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLnZlaGljbGUucHJpdmF0ZS5BQ1RJT05fVklFVyIsInJlc291cmNlLnZlaGljbGUucHJpdmF0ZS5BQ1RJT05fQUREIiwicmVzb3VyY2UudmVoaWNsZS5wcml2YXRlLkFDVElPTl9VUERBVEUiLCJyZXNvdXJjZS52ZWhpY2xlLnByaXZhdGUuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnZlaGljbGUucHJpdmF0ZS5BQ1RJT05fVVNFIiwicmVzb3VyY2UudmVoaWNsZS5wZXJzb25hbC5BQ1RJT05fVklFVyIsInJlc291cmNlLnZlaGljbGUucGVyc29uYWwuQUNUSU9OX1VQREFURSIsInJlc291cmNlLnZlaGljbGUucGVyc29uYWwuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnNlbnNvci5wdWJsaWMuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zZW5zb3IucHVibGljLkFDVElPTl9VU0UiLCJyZXNvdXJjZS5zZW5zb3IucHJpdmF0ZS5BQ1RJT05fVklFVyIsInJlc291cmNlLnNlbnNvci5wcml2YXRlLkFDVElPTl9BREQiLCJyZXNvdXJjZS5zZW5zb3IucHJpdmF0ZS5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2Uuc2Vuc29yLnByaXZhdGUuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnNlbnNvci5wcml2YXRlLkFDVElPTl9VU0UiLCJyZXNvdXJjZS5zZW5zb3IucGVyc29uYWwuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zZW5zb3IucGVyc29uYWwuQUNUSU9OX1VQREFURSIsInJlc291cmNlLnNlbnNvci5wZXJzb25hbC5BQ1RJT05fREVMRVRFIiwicmVzb3VyY2UubWFwLnB1YmxpYy5BQ1RJT05fVklFVyIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX1VQREFURSIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLm1hcC5wcml2YXRlLkFDVElPTl9WSUVXIiwicmVzb3VyY2UubWFwLnByaXZhdGUuQUNUSU9OX0FERCIsInJlc291cmNlLm1hcC5wcml2YXRlLkFDVElPTl9VUERBVEUiLCJyZXNvdXJjZS5tYXAucHJpdmF0ZS5BQ1RJT05fREVMRVRFIiwicmVzb3VyY2UubWFwLnByaXZhdGUuQUNUSU9OX1VTRSIsInJlc291cmNlLm1hcC5wZXJzb25hbC5BQ1RJT05fVklFVyIsInJlc291cmNlLm1hcC5wZXJzb25hbC5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2UubWFwLnBlcnNvbmFsLkFDVElPTl9ERUxFVEUiLCJyZXNvdXJjZS5zY2VuYXJpby5wdWJsaWMuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zY2VuYXJpby5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLnNjZW5hcmlvLnByaXZhdGUuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zY2VuYXJpby5wcml2YXRlLkFDVElPTl9DT1BZIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fREVMRVRFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fVVNFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fQUREIiwicmVzb3VyY2Uuc2NlbmFyaW8ucGVyc29uYWwuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zY2VuYXJpby5wZXJzb25hbC5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucGVyc29uYWwuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHVibGljLkFDVElPTl9WSUVXIiwicmVzb3VyY2UudHJhZmZpY19mbG93X2NvbmZpZy5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHJpdmF0ZS5BQ1RJT05fVklFVyIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHJpdmF0ZS5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2UudHJhZmZpY19mbG93X2NvbmZpZy5wcml2YXRlLkFDVElPTl9ERUxFVEUiLCJyZXNvdXJjZS50cmFmZmljX2Zsb3dfY29uZmlnLnByaXZhdGUuQUNUSU9OX1VTRSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHJpdmF0ZS5BQ1RJT05fQUREIiwicmVzb3VyY2UudHJhZmZpY19mbG93X2NvbmZpZy5wZXJzb25hbC5BQ1RJT05fVklFVyIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucGVyc29uYWwuQUNUSU9OX1VQREFURSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucGVyc29uYWwuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLm1hcC5wcml2YXRlLkFDVElPTl9ET1dOTE9BRCIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX0RPV05MT0FEIl0sImlzcyI6InVzZXIiLCJzdWIiOiJMYXNWU2ltIiwiZXhwIjoxNjk4NjM4MzMwLCJuYmYiOjE2OTgwMzM1MzAsImlhdCI6MTY5ODAzMzUzMCwianRpIjoiMTMifQ.FBRtXhtc42paYAnj6Ilf6BLkDeWsAdIBXIjhnjhcyks'
+    token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEzLCJvaWQiOjEwMSwibmFtZSI6IueGiuadsCIsImlkZW50aXR5Ijoibm9ybWFsIiwicGVybWlzc2lvbnMiOlsidGFzay50YXNrLnB1YmxpYy5BQ1RJT05fVklFVyIsInRhc2sudGFzay5wdWJsaWMuQUNUSU9OX0NPUFkiLCJ0YXNrLnRhc2sucHVibGljLkFDVElPTl9SRVBMQVkiLCJ0YXNrLnRhc2sucHVibGljLkFDVElPTl9SRVBPUlQiLCJ0YXNrLnRhc2sucHJpdmF0ZS5BQ1RJT05fVklFVyIsInRhc2sudGFzay5wcml2YXRlLkFDVElPTl9BREQiLCJ0YXNrLnRhc2sucHJpdmF0ZS5BQ1RJT05fQ09QWSIsInRhc2sudGFzay5wcml2YXRlLkFDVElPTl9ERUxFVEUiLCJ0YXNrLnRhc2sucHJpdmF0ZS5BQ1RJT05fUkVQTEFZIiwidGFzay50YXNrLnByaXZhdGUuQUNUSU9OX1JFUE9SVCIsInRhc2sudGFzay5wZXJzb25hbC5BQ1RJT05fVklFVyIsInRhc2sudGFzay5wZXJzb25hbC5BQ1RJT05fREVMRVRFIiwidGFzay50YXNrLnBlcnNvbmFsLkFDVElPTl9SRVBMQVkiLCJ0YXNrLnRhc2sucGVyc29uYWwuQUNUSU9OX1JFUE9SVCIsInJlc291cmNlLnZlaGljbGUucHVibGljLkFDVElPTl9WSUVXIiwicmVzb3VyY2UudmVoaWNsZS5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLnZlaGljbGUucHJpdmF0ZS5BQ1RJT05fVklFVyIsInJlc291cmNlLnZlaGljbGUucHJpdmF0ZS5BQ1RJT05fQUREIiwicmVzb3VyY2UudmVoaWNsZS5wcml2YXRlLkFDVElPTl9VUERBVEUiLCJyZXNvdXJjZS52ZWhpY2xlLnByaXZhdGUuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnZlaGljbGUucHJpdmF0ZS5BQ1RJT05fVVNFIiwicmVzb3VyY2UudmVoaWNsZS5wZXJzb25hbC5BQ1RJT05fVklFVyIsInJlc291cmNlLnZlaGljbGUucGVyc29uYWwuQUNUSU9OX1VQREFURSIsInJlc291cmNlLnZlaGljbGUucGVyc29uYWwuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnNlbnNvci5wdWJsaWMuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zZW5zb3IucHVibGljLkFDVElPTl9VU0UiLCJyZXNvdXJjZS5zZW5zb3IucHJpdmF0ZS5BQ1RJT05fVklFVyIsInJlc291cmNlLnNlbnNvci5wcml2YXRlLkFDVElPTl9BREQiLCJyZXNvdXJjZS5zZW5zb3IucHJpdmF0ZS5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2Uuc2Vuc29yLnByaXZhdGUuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnNlbnNvci5wcml2YXRlLkFDVElPTl9VU0UiLCJyZXNvdXJjZS5zZW5zb3IucGVyc29uYWwuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zZW5zb3IucGVyc29uYWwuQUNUSU9OX1VQREFURSIsInJlc291cmNlLnNlbnNvci5wZXJzb25hbC5BQ1RJT05fREVMRVRFIiwicmVzb3VyY2UubWFwLnB1YmxpYy5BQ1RJT05fVklFVyIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX1VQREFURSIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLm1hcC5wcml2YXRlLkFDVElPTl9WSUVXIiwicmVzb3VyY2UubWFwLnByaXZhdGUuQUNUSU9OX0FERCIsInJlc291cmNlLm1hcC5wcml2YXRlLkFDVElPTl9VUERBVEUiLCJyZXNvdXJjZS5tYXAucHJpdmF0ZS5BQ1RJT05fREVMRVRFIiwicmVzb3VyY2UubWFwLnByaXZhdGUuQUNUSU9OX1VTRSIsInJlc291cmNlLm1hcC5wZXJzb25hbC5BQ1RJT05fVklFVyIsInJlc291cmNlLm1hcC5wZXJzb25hbC5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2UubWFwLnBlcnNvbmFsLkFDVElPTl9ERUxFVEUiLCJyZXNvdXJjZS5zY2VuYXJpby5wdWJsaWMuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zY2VuYXJpby5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLnNjZW5hcmlvLnByaXZhdGUuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zY2VuYXJpby5wcml2YXRlLkFDVElPTl9DT1BZIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fREVMRVRFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fVVNFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucHJpdmF0ZS5BQ1RJT05fQUREIiwicmVzb3VyY2Uuc2NlbmFyaW8ucGVyc29uYWwuQUNUSU9OX1ZJRVciLCJyZXNvdXJjZS5zY2VuYXJpby5wZXJzb25hbC5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2Uuc2NlbmFyaW8ucGVyc29uYWwuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHVibGljLkFDVElPTl9WSUVXIiwicmVzb3VyY2UudHJhZmZpY19mbG93X2NvbmZpZy5wdWJsaWMuQUNUSU9OX1VTRSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHJpdmF0ZS5BQ1RJT05fVklFVyIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHJpdmF0ZS5BQ1RJT05fVVBEQVRFIiwicmVzb3VyY2UudHJhZmZpY19mbG93X2NvbmZpZy5wcml2YXRlLkFDVElPTl9ERUxFVEUiLCJyZXNvdXJjZS50cmFmZmljX2Zsb3dfY29uZmlnLnByaXZhdGUuQUNUSU9OX1VTRSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucHJpdmF0ZS5BQ1RJT05fQUREIiwicmVzb3VyY2UudHJhZmZpY19mbG93X2NvbmZpZy5wZXJzb25hbC5BQ1RJT05fVklFVyIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucGVyc29uYWwuQUNUSU9OX1VQREFURSIsInJlc291cmNlLnRyYWZmaWNfZmxvd19jb25maWcucGVyc29uYWwuQUNUSU9OX0RFTEVURSIsInJlc291cmNlLm1hcC5wcml2YXRlLkFDVElPTl9ET1dOTE9BRCIsInJlc291cmNlLm1hcC5wdWJsaWMuQUNUSU9OX0RPV05MT0FEIl0sImlzcyI6InVzZXIiLCJzdWIiOiJMYXNWU2ltIiwiZXhwIjoxNzAwNjM0MjQ3LCJuYmYiOjE3MDAwMjk0NDcsImlhdCI6MTcwMDAyOTQ0NywianRpIjoiMTMifQ.KrpwH-PbzevoolTY7-95lzeb_SDW7oYMix0hQ5F9Stc'
     metadata = [('authorization','Bearer ' + token)]
     http = 'qianxing-grpc.risenlighten.com:80'
     # http='127.0.0.1:8290'  #桌面端lasvsim连接grpc用
@@ -325,19 +390,19 @@ class Cosim():
     # 创建channelArguments对象来设置选项
     channel_args = [('grpc.max_receive_message_length', max_recv_msg_size), ('grpc.default_timeout', 100)]
 
-    task_id,record_id,vehicle_id = 4645,4201,'ego'
+    task_id,record_id,vehicle_id = 4801,4740,'ego'
     vehicle_id_list = [vehicle_id]
     progress_times,save_time,data_num = 0,0,0
     choosed_list,vehicle_id_list_new,veh_id_around,all_vehs_pos,allvehs_info,control_value,used_names_list = [],[],[],[],[],[],[]
     veh_info,agent,ctrl_value = {},{},{}
     old_file_path,simulation_id = '',''
 
-    def run(self):
+    def run(self,num=300):
         with grpc.insecure_channel(self.http, options=self.channel_args) as channel:
             stub = simulation_pb2_grpc.CosimStub(channel)
             self.simulation_start(stub)
             file_path = self.built_file_dir(file_type='pkl')
-            for i in range(300):
+            for i in range(num):
                 start_time=time.time()
                 print("=" * 100,'\n',f'i:{i}')
                 result = self.step(stub)
@@ -349,7 +414,7 @@ class Cosim():
                     if not self.vehicle_id_list_new:#todo 找最近10辆控制车
                         ctrl_vehs = []
                         ctrl_l_list,ctrl_f_list = get_ctrl_vehs(all_vehs_pos)
-                        self.vehicle_id_list_new = self.vehicle_id_list + ctrl_l_list
+                        self.vehicle_id_list_new = self.vehicle_id_list + ctrl_l_list+ctrl_f_list
                         for veh in self.vehicle_id_list_new:
                             vehicle = stub.GetVehicle(simulation_pb2.GetVehicleReq(simulation_id=self.simulation_id, vehicle_id=veh), metadata=self.metadata)
                             veh_info=dict(Length=vehicle.vehicle.info.base_info.Length,Width=vehicle.vehicle.info.base_info.Width,Weight=vehicle.vehicle.info.base_info.Weight,
@@ -361,10 +426,16 @@ class Cosim():
                     for num,veh in enumerate(ctrl_vehs):
                         print(f'控制第{num + 1}辆车,id为{veh.id},总共{len(ctrl_vehs)}辆车')
                         vehicle, nearest_veh_id_around = self.get_veh_around(stub, veh.id,all_vehs_pos)
-                        if vehicle.vehicle.info.moving_info.position.link_id=='' \
-                                or vehicle.vehicle.info.moving_info.position.dis_to_link_end<15:continue
-                        y_list=self.get_y_list(stub,vehicle.vehicle.info.moving_info.position.link_id,vehicle.vehicle.info.moving_info.position.point)
-                        veh_values = veh.update(allvehs_info,vehicle.vehicle.info,nearest_veh_id_around,y_list) #if veh.id=='ego' else [[0.5],[0]]
+                        time_model_begin=time.time()
+                        if vehicle.vehicle.info.moving_info.position.link_id=='' :continue
+                        #if vehicle.vehicle.info.moving_info.position.dis_to_link_end<15:continue
+                        static_paths = stub.GetVehicleReferenceLines(simulation_pb2.GetVehicleReferenceLinesReq(simulation_id=self.simulation_id,vehicle_id=veh.id), metadata=self.metadata)
+                        # if len(static_paths.data)<2:
+                        #     print(f'{veh.id}静态路径为{len(static_paths.data)}条')
+                        #     continue
+                        veh_values = veh.update(allvehs_info,vehicle.vehicle.info,nearest_veh_id_around,static_paths) #if veh.id=='ego' else [[0.5],[0]]
+                        time_model_end = time.time()
+                        print('机动车模型控制单辆车计算耗时{:<1.4f}s'.format(time_model_end-time_model_begin))
                         self.control_veh(stub, veh.id, veh_values['control_value'])
                         with open(os.path.join(file_path, 'ctrl_veh_values.pkl'), 'ab') as file:
                             ctrl_veh_info={'i':i,'veh_id':veh.id,'ctrl_value':veh_values['control_value'],'lane_id':veh.lane_id,'dis_to_link':veh.dis_to_link_end,'u':veh.u,'phi':veh.phi,
@@ -376,36 +447,59 @@ class Cosim():
                 print(f'单步耗时{round(end_time-start_time,2)}s')
             self.simulation_stop(stub)
 
-    def load_pkl(self):
+    def sampler_behavior(self):#被测车采样异常行为
+        v_test=0
+        beha_id=0
+        beha_group={1:[1],2:[2],3:[3]}
+        P_dict={1:0.1,2:0.1,3:0.1,4:0.1,5:0.1,6:0.1,7:0.1,8:0.1,9:0.1,10:0.1,11:0.1,12:0.1}
+        return beha_id
+
+    def judge_condition(self):#异常行为触发条件
+        ...
+        '''
+        case1:右侧超车
+        overtake
+        case2:加塞
+        cutin
+        '''
+
+    def find_abnormal_veh(self):#寻找异常行为被控车
+        ...
+
+    def exec_abnormal_beha(self):#执行异常行为
+        ...
+
+    
+    def load_pkl(self,file_name):
         pkl_name={1:'ctrl_vehs.pkl',2:'ctrl_veh_values.pkl',3:'data.pkl'}
-        acc_list,v_list,phi_list,rel_dis_list,y_list,steer_list,selected_id_list=[],[],[],[],[],[],[]
-        # value_dict={'acc':acc_list,'v':v_list}
-        # value_dict = {'y': y_list, 'phi': phi_list}
-        # value_dict = {'steer': steer_list, 'selected_id': selected_id_list}
+        i_list,acc_list,v_list,phi_list,rel_dis_list,y_list,steer_list,selected_id_list=[],[],[],[],[],[],[],[]
         value_dict_list=[{'acc':acc_list,'v':v_list},{'y': y_list, 'phi': phi_list},{'steer': steer_list, 'selected_id': selected_id_list}]
-        vdi=2
-        value_dict=value_dict_list[vdi]
         var_unit_dict={'acc':' [m/s^2]','v':' [m/s]','y':' [m]','phi':'[deg]','steer':'[deg]','selected_id':'','bias_lat':' [m]','bias_v':' [m/s]'}
 
         def plot_sub_single(axs,i,key,value_list):
-            axs[i].plot(value_list)
+            axs[i].plot(i_list,value_list)
             axs[i].set_title(key+'_sequence')
             axs[i].set_xlabel('steps')
             axs[i].set_ylabel(key+var_unit_dict[key])
-        def plot():
+
+        def plot(num):
             import matplotlib.pyplot as plt
             fig, axs = plt.subplots(len(value_dict))
             i=0
             for key,value in value_dict.items():
                 plot_sub_single(axs,i,key,value)
+                if key == 'selected_id': plt.ylim(top=0, bottom=4)
+                print(f'{key}列表长度；{len(value)}')
                 i+=1
+            # plt.text(f'受控车辆{ctrl_id}',horizontalalignment='left', verticalalignment='top')
 
             plt.tight_layout()
-            plt.savefig(os.path.join(document_name,f'{vdi+1}.jpg'))
+            plt.savefig(os.path.join(document_name,f'{ctrl_id}_{num}.jpg'))
             plt.show()
         for key,pkl_name_selected in pkl_name.items():
-            document_name='./projects/pkl/202310172011-4644-4200'
+            document_name='./projects/pkl/'+file_name
             file_path = os.path.join(document_name, pkl_name_selected)
+            ctrl_id = 'npc15'
             with open(file_path, 'rb') as file:
                 if key==3:continue
                 if pkl_name_selected!='ctrl_vehs.pkl':
@@ -414,9 +508,11 @@ class Cosim():
                         try:#9.24新加了保存x,y及后面的信息,0103-4530-3707后，J_value替换成了eval_value，有J值，eval_safe和eval_traffic值
                             data=pickle.load(file)  #if key==3: print(data['i'],data['all_vehs_pos'][0]['id'],data['allvehs_info'][0].id)
                             def process_veh_data():
-                                if key==2 and data['veh_id']=='ego':#npc144,ego
+
+                                if key==2 and data['veh_id']==ctrl_id:#npc144,ego
                                     print(data['i'],data['veh_id'],'ctrl_value:',[item.tolist() for item in data['ctrl_value']],'x:',data['x'],'y:',data['y'],'u:',data['u'],'phi:',data['phi'],
                                        'lane_id:',data['lane_id'],'dis_to_link:',data['dis_to_link'],'eval_value:',data['eval_value'],'selected_id:',data['selected_id'],'\n','vehs_relation_lane1:',data['vehs_relation']['v1l'],data['vehs_relation']['v1f'],'\n','vehs_relation_lane2:',data['vehs_relation']['v2l'],data['vehs_relation']['v2f'],'\n','vehs_relation_lane3:',data['vehs_relation']['v3l'],data['vehs_relation']['v3f'])
+                                    i_list.append(data['i'])
                                     acc_list.append([item.tolist() for item in data['ctrl_value']][0][0])
                                     car_leader=data['vehs_relation']['v{}l'.format(data['lane_id'][-1])]
                                     rel_dis_list.append((car_leader['x'] if car_leader else data['x']+30) -data['x'])
@@ -437,7 +533,8 @@ class Cosim():
                             step+=1
                             # if step>10:break
                         except EOFError:break
-                    plot()
+                    for num,value_dict in enumerate(value_dict_list):
+                        plot(num+1)
 
                 if pkl_name_selected=='ctrl_vehs.pkl':
                     data = pickle.load(file)
@@ -449,16 +546,19 @@ class Cosim():
         self.simulation_id = startResp.simulation_id
 
     def step(self,stub):
+        time_begin=time.time()
         try:
             stepResult = stub.NextStep(simulation_pb2.NextStepReq(
                 simulation_id=self.simulation_id), metadata=self.metadata)
             print('stepResult:', stepResult.state.progress)
             if (stepResult.state.progress <= 0) or (stepResult.state.progress >= 100):
-                return True
                 print(f"仿真结束,状态：{stepResult.state.msg}")
+                return True
             else:return False
         except Exception as e:print('step_error:', e)
         print('*' * 100)
+        time_end=time.time()
+        print(f'step消耗时间为{time_end-time_begin}s')
 
     def simulation_stop(self,stub):
 
@@ -468,10 +568,13 @@ class Cosim():
             simulation_id=self.simulation_id), metadata=self.metadata)
 
     def get_y_list(self,stub,link_id,point):
+        time_begin=time.time()
         lanes=self.getLinkinfo(stub,link_id).link.ordered_lanes[1:]
         idx=min(range(len(lanes[0].center_line)),key=lambda index:abs(lanes[0].center_line[index].x-point.x))
         y_list=[item.center_line[idx].y for item in lanes]
         print(f'y_list_idx:{idx},y_list:{y_list},center_line_x:{lanes[0].center_line[idx].x},veh_point:{point.x, point.y}')
+        time_end=time.time()
+        print('联合仿真获取道路信息接口耗时{:<1.4f}'.format(time_end-time_begin))
         return y_list
 
     def getLinkinfo(self,stub,link_id)->list:
@@ -503,17 +606,21 @@ class Cosim():
         return allvehs_position, allvehs_info_raw
 
     def control_veh(self,stub, vehicle_id, control_value):
+        time_begin=time.time()
         print(f"control_value:{control_value}")
         vehicleControleReult = stub.SetVehicleControl(simulation_pb2.SetVehicleControlReq(
             simulation_id=self.simulation_id, vehicle_id=vehicle_id,
             lon_acc=control_value[0][0], ste_wheel=control_value[1][0]), metadata=self.metadata)
         checkError(vehicleControleReult.error)
+        time_end=time.time()
+        print('control_veh 花费时间{:<1.4f}s'.format(time_end-time_begin))
 
     def get_veh_around(self, stub, vehicle_id,all_vehs_pos)->tuple:
         """
         1.整个地图的车辆
         2.根据距离筛选出最近的10辆
         """
+        time_begin=time.time()
         vehicle = stub.GetVehicle(simulation_pb2.GetVehicleReq(
             simulation_id=self.simulation_id, vehicle_id=vehicle_id), metadata=self.metadata)
         checkError(vehicle.error)
@@ -524,6 +631,8 @@ class Cosim():
             # 得到指定范围内周车
             nearest_vehs = get_nearest_vehs(vehicle, veh_around, 100, 10)
             nearest_veh_id_around = list(map(lambda x: x['id'], nearest_vehs))
+        time_end=time.time()
+        print('vehicle接口时间{:<1.4f}s'.format(time_end-time_begin))
         return vehicle, nearest_veh_id_around
     def built_file_dir(self,file_type='csv'):
         current_time = time.strftime("%Y%m%d%H%M%S").replace(':', '')
@@ -613,7 +722,7 @@ def checkError(err):
         print(err.msg)
         return True
 
-def get_ctrl_vehs(all_vehs_pos, l_num=9,f_num=3):
+def get_ctrl_vehs(all_vehs_pos, l_num=8,f_num=8):
     key_veh_id = 'ego'
     key_veh = list(filter(lambda d: d['id'] == key_veh_id, all_vehs_pos))[0]
     vehs_l = [item for item in all_vehs_pos if -100 < item['dis_to_link_end'] - key_veh['dis_to_link_end'] < 0
@@ -669,8 +778,8 @@ def render(frame:Surr,eval_value,ego_name: str = None):
     plt.axis('equal')
 
 if __name__ == '__main__':
-    Cosim().run()
-    # Cosim().load_pkl()
+    # Cosim().run()
+    Cosim().load_pkl('202311201323-4801-4740')
     def test_eval_value(Surr):
         import matplotlib.pyplot as plt
         import numpy as np

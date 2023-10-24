@@ -2,6 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
+from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from risenlighten.lasvsim.process_task.api.cosim.v1 import simulation_pb2 as risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2
 
 
@@ -115,6 +116,26 @@ class CosimStub(object):
                 '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/GetAllVehicles',
                 request_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllVehiclesReq.SerializeToString,
                 response_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllVehiclesRes.FromString,
+                )
+        self.Release = channel.unary_unary(
+                '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/Release',
+                request_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.ReleaseReq.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                )
+        self.GetAllPedestrian = channel.unary_unary(
+                '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/GetAllPedestrian',
+                request_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllPedestrianReq.SerializeToString,
+                response_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllPedestrianRes.FromString,
+                )
+        self.UpdatePedestrian = channel.unary_unary(
+                '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/UpdatePedestrian',
+                request_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.UpdatePedestrianReq.SerializeToString,
+                response_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.UpdatePedestrianRes.FromString,
+                )
+        self.GetVehicleReferenceLines = channel.unary_unary(
+                '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/GetVehicleReferenceLines',
+                request_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetVehicleReferenceLinesReq.SerializeToString,
+                response_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetVehicleReferenceLinesRes.FromString,
                 )
 
 
@@ -257,6 +278,34 @@ class CosimServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def Release(self, request, context):
+        """释放内存
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAllPedestrian(self, request, context):
+        """获取所有行人对象
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UpdatePedestrian(self, request, context):
+        """更新当前行人moving信息
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetVehicleReferenceLines(self, request, context):
+        """获取车辆ReferenceLines信息
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_CosimServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -344,6 +393,26 @@ def add_CosimServicer_to_server(servicer, server):
                     servicer.GetAllVehicles,
                     request_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllVehiclesReq.FromString,
                     response_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllVehiclesRes.SerializeToString,
+            ),
+            'Release': grpc.unary_unary_rpc_method_handler(
+                    servicer.Release,
+                    request_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.ReleaseReq.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'GetAllPedestrian': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAllPedestrian,
+                    request_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllPedestrianReq.FromString,
+                    response_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllPedestrianRes.SerializeToString,
+            ),
+            'UpdatePedestrian': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdatePedestrian,
+                    request_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.UpdatePedestrianReq.FromString,
+                    response_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.UpdatePedestrianRes.SerializeToString,
+            ),
+            'GetVehicleReferenceLines': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetVehicleReferenceLines,
+                    request_deserializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetVehicleReferenceLinesReq.FromString,
+                    response_serializer=risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetVehicleReferenceLinesRes.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -658,5 +727,73 @@ class Cosim(object):
         return grpc.experimental.unary_unary(request, target, '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/GetAllVehicles',
             risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllVehiclesReq.SerializeToString,
             risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllVehiclesRes.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def Release(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/Release',
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.ReleaseReq.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetAllPedestrian(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/GetAllPedestrian',
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllPedestrianReq.SerializeToString,
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetAllPedestrianRes.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def UpdatePedestrian(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/UpdatePedestrian',
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.UpdatePedestrianReq.SerializeToString,
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.UpdatePedestrianRes.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetVehicleReferenceLines(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/risenlighten.lasvsim.process_task.api.cosim.v1.Cosim/GetVehicleReferenceLines',
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetVehicleReferenceLinesReq.SerializeToString,
+            risenlighten_dot_lasvsim_dot_process__task_dot_api_dot_cosim_dot_v1_dot_simulation__pb2.GetVehicleReferenceLinesRes.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

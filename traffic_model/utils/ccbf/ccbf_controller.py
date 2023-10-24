@@ -3,6 +3,7 @@
 """
 2D Controller Class to be used for waypoint following demo.
 """
+import datetime
 
 import numpy as np
 from collections import deque
@@ -588,7 +589,8 @@ class CCBF_Controller(object):
 
     # Lyapunov Controller / testing code (separately calculate input for rel1 and rel2, then add input)
     #10.13测试（1,2000）
-    def construct_clf_sep(self,k=1,slack_variable=2000):#3.5,1.5
+    def construct_clf_sep(self,k=5,slack_variable=0.3):#3.5,1.5
+        # slack_variable = 0.3
         # how about connect d_safe with velocity?
         self.k = k    #default:k = 1,0.5,3
 
@@ -679,6 +681,10 @@ class CCBF_Controller(object):
             e_x1,e_x2,e_x3,e_x4,e_x5,e_x6 = coord.base_vectors()
 
             V1 = self.P4*(u-u_ref)**2 + self.P5*(v-v_ref)**2 + self.P6*(omega-omega_ref)**2
+            # V1 = (self.P1 * (x - x_ref) + self.P4 * (u - u_ref)) ** 2 + (
+            #             self.P2 * (y - y_ref) + self.P5 * (v - v_ref)) ** 2 + (
+            #                  self.P3 * (yaw - yaw_ref) + self.P6 * (omega - omega_ref)) ** 2\
+            #      + (self.P3 * (yaw - yaw_ref) + self.P5 * (v - v_ref)) ** 2
             V2 = self.P1*(x-x_ref)**2 + self.P2*(y-y_ref)**2 + self.P3*(yaw-yaw_ref)**2
 
 
@@ -687,12 +693,12 @@ class CCBF_Controller(object):
                 + (u*sympy.sin(yaw)+v*sympy.cos(yaw))*e_x2 \
                     + omega*e_x3 \
                         + (v*omega)*e_x4 \
-                            + (-u*omega + kf/m *((v+a*omega)/u)+(kr/m)*((v-b*omega)/u))*e_x5 \
-                                + ( (a*kf/Iz)*((v+a*omega)/u) - (b*kr/Iz)*((v-b*omega)/u) )*e_x6
+                            + (-u*omega + kf/m *((v+a*omega)/(u+0.00001))+(kr/m)*((v-b*omega)/(u+0.00001)))*e_x5 \
+                                + ( (a*kf/Iz)*((v+a*omega)/(u+0.00001)) - (b*kr/Iz)*((v-b*omega)/(u+0.00001)) )*e_x6
             
             g_acc = 0*e_x1 + 0*e_x2 + 0*e_x3 + 1*e_x4 + 0*e_x5 + 0*e_x6
             # Edit the error
-            g_delta = 0*e_x1 + 0*e_x2 + 0*e_x3 - 1/m*(kf*((v+a*omega)/u))*e_x4 -kf/m*e_x5 -a*kf/Iz*e_x6
+            g_delta = 0*e_x1 + 0*e_x2 + 0*e_x3 - 1/m*(kf*((v+a*omega)/(u+0.00001)))*e_x4 -kf/m*e_x5 -a*kf/Iz*e_x6
 
     
             LfV2 = LieDerivative(f, V2)
@@ -703,8 +709,6 @@ class CCBF_Controller(object):
             self.clf_value_2 = lambdify([x, y, yaw, u, v, omega, x_ref, y_ref, yaw_ref, u_ref, v_ref, omega_ref], V2, 'numpy')
             # global_value_obj.set_clf_value(self.clf_value)
             # global_value_obj.set_clf_value_2(self.clf_value_2)
-
-
 
             LfV = LieDerivative(f, V)
 
@@ -720,7 +724,8 @@ class CCBF_Controller(object):
             bTb = LgVTLgV[0]
             self.clf_btb = lambdify([x, y, yaw, u, v, omega, x_ref, y_ref, yaw_ref, u_ref, v_ref, omega_ref], bTb, 'numpy')
 
-            gamma = 800.0
+            # gamma = 800.0
+            gamma = 5
             input_u1 = -((LfV + sympy.sqrt(LfV*LfV+gamma*sympy.transpose(bTb)*bTb))/(self.slack_variable + bTb))*LgV
 
 
@@ -739,12 +744,7 @@ class CCBF_Controller(object):
             LgVTLgV2_new = sympy.transpose(LgV2_new)*LgV2_new
             bTbV2_new = LgVTLgV2_new[0]
             self.clf_btbV2_new = lambdify([x, y, yaw, u, v, omega, x_ref, y_ref, yaw_ref, u_ref, v_ref, omega_ref], bTbV2_new, 'numpy')
-
-
             input_u2 = -((LfV2_new + self.k*V2_new)/(self.slack_variable + bTbV2_new))*LgV2_new
-
-
-
             if (input_u1 == nan):
                 input_u = input_u2
             elif (input_u2 == nan):
@@ -789,8 +789,9 @@ class CCBF_Controller(object):
         # input_u2=global_value_obj.get_input_u2()
         # self.input_u1=input_u1 if input_u1 is not None else self.input_u1
         # self.input_u2=input_u2 if input_u2 is not None else self.input_u2
-        input_val1 = self.input_u1(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
-        input_val2 = self.input_u2(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
+
+        # input_val1 = self.input_u1(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
+        # input_val2 = self.input_u2(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
         if self.clf_control_law is not None:
             input_val_com=self.clf_control_law(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
         else:
@@ -808,7 +809,7 @@ class CCBF_Controller(object):
         self.throttle_clf = input_val_com[0] if input_val_com.any() else [0]
         self.throttle=self.throttle_clf
         self.steer = input_val_com[1] if input_val_com.any() else [0]
-        return self.throttle_clf
+        return self.throttle_clf,self.steer
 
 # Lyapunov Controller / testing code (separately calculate input for rel1 and rel2, then add input)
     def construct_clf_sep_mix(self):
@@ -1591,7 +1592,7 @@ class CCBF_Controller(object):
 
     # log and exponential version
     #strength越大，幅值越大，exponen_stiff越大，图像越平滑,#100,1.5,可用(10,0.7),(100,0.8),9.25测试(100,0.3),(30,0.3),(40,0.3)btb+0.1,10.13(20,0.2)
-    def construct_cbf_front_veh(self, x_max_n,v_l=0, strength = 20, exponen_stiff = 0.2, type='max'):
+    def construct_cbf_front_veh(self, x_max_n,v_l=0, strength = 10, exponen_stiff = 0.2,clf_weight=0.08, type='max'):
         # vehicle width and height
         throttle,steer=0,0
         # self.update_desired_speed()
@@ -1648,12 +1649,12 @@ class CCBF_Controller(object):
             LfLgV = sympy.Matrix([LfLg1V, LfLg2V])
 
             LgVTLgV = sympy.transpose(LfLgV)*LfLgV
-            bTb = LgVTLgV[0]+0.1    #9.25新加0.1,防止出现奇点，btb不能接近0，加一个常数0.5左右的值
+            bTb = LgVTLgV[0]+0.1*self.slack_variable    #9.25新加0.1,防止出现奇点，btb不能接近0，加一个常数0.5左右的值
             self.cbf_col_avoid_btb = lambdify([x, y, yaw, u, v, omega, x_max], bTb, 'numpy')
             # if bTb.subs([(x, self._current_x), (y, self._current_y),(yaw, self._current_yaw),(u, self._current_vx), (v, self._current_vy), (omega, self._current_omega), (x_obs, self.x_obs),(y_obs, self.y_obs)]).evalf(10) <= 0.01:
             #     return [0,0]
             # 输出的控制量和2阶导，1阶导，V有关，取加权和
-            input_u = -((LfLfV + 2*self.k*LfV + (self.k**2)*V)/(bTb))*LfLgV     #23.9.25 仿真值和测试值不一致
+            input_u = -((LfLfV + 2*k*LfV + (k**2)*V)/(bTb))*LfLgV     #23.9.25 仿真值和测试值不一致
 
             # print('input_u: ', input_u)
 
@@ -1682,14 +1683,17 @@ class CCBF_Controller(object):
             self.cbf_on = False
         if True:
         # else:
-            input_val = self.cbf_col_avoid_cont_law(self._current_x, self._current_y, self._current_yaw, 0.01 if self._current_vx-v_l==0 else max(self._current_vx-v_l,min((-8+0.5*x_max_n),-6)), self._current_vy, self._current_omega, x_max_n)
+            input_val = self.cbf_col_avoid_cont_law(self._current_x, self._current_y, self._current_yaw, 0.01 if self._current_vx-v_l==0
+            else max(self._current_vx-v_l,min((-8+0.5*x_max_n),-6)), self._current_vy, self._current_omega, x_max_n)
             end_lambdify_eval = time.time()
             print(f'***********input_val:{input_val}')
             print(f'*********time for lambdify function: {end_lambdify_eval-start_lambdify_eval}' )
             print("grad_h: ", grad_h,',grad LfV:', grad1_h,",h value: ", h_value)
 
-            self.throttle_cbf=input_val[0]
-            self.throttle=(x_max_n/30)*self.throttle_clf+self.throttle_cbf
+            self.throttle_cbf=min(input_val[0],0)
+            # try:self.throttle=round(x_max_n/30,2)*self.throttle_clf + self.throttle_cbf
+            try: self.throttle = min(round(1/np.exp(clf_weight*(30-x_max_n)), 2),1) * self.throttle_clf + self.throttle_cbf
+            except Exception:print(Exception,self.throttle_clf,x_max_n)
             # self.steer = np.fmax(np.fmin(input_val[1], max_steer), min_steer)
             # self.steer = input_val[1] # 차선책
             self.cbf_on = True
@@ -2292,12 +2296,111 @@ class CCBF_Controller(object):
         # Clamp the steering command to valid bounds
         self.steer = np.fmax(np.fmin(input_steer, 1.0), -1.0)
         # Calculate the control input for lyapunov function
+
+class veh():
+    def __init__(self, x, y, u, phi):
+        self.x = x
+        self.y = y
+        self.u = u
+        self.phi = phi
+        self.t_step = 0.1
+        self.target_v=15
+        from traffic_model.utils.ccbf import CCBFOption, VehicleSpec
+        self.ref_path_short=[]
+        self.ccbf_controller = CCBF_Controller(VehicleSpec())
+        (P1, P2, P3, P4, P5, P6) = CCBFOption.weight
+        self.ccbf_controller.update_lyapunov_parameter(P1, P2, P3, P4, P5, P6)
+
+    def update(self,leader):
+        ref_path = [np.arange(0, 800, 0.5), np.ones(1600) * 20]
+        closest_idx=min(range(len(ref_path[0])),key=lambda i:abs(ref_path[0][i]-self.x))
+        ref_path_short=[ref_path[0][closest_idx:closest_idx+40],ref_path[1][closest_idx:closest_idx+40],np.zeros(40),np.ones(40)*self.target_v]
+        self.ref_path_short=ref_path_short
+        accel_final, accel_clf, accel_cbf, steer = self.clbf(ref_path_short,leader)
+        accel_final=np.clip(accel_final[0],-7,2.3)
+        steer=np.clip(steer[0],-0.4,0.4)
+        print(f'accel_final:{accel_final},steer:{steer},accel_clf:{accel_clf}, accel_cbf:{accel_cbf}')
+        self.phisical_model(accel_final,steer)
+        # self.render()
+
+    def reset(self):
+        ...
+
+    def render(self):
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+
+        fig, ax = plt.subplots()
+        rectangle = plt.Rectangle((0, 0), 1, 1, fc='b')  # Initial rectangle at (0,0) with width 1 and height 1
+        ax.add_patch(rectangle)
+        ax.set_xlim(-2, 20)
+        ax.set_ylim(-2, 20)
+
+        def update(frame):
+            # Update the position of the rectangle (modify these parameters based on your motion logic)
+            rectangle.set_xy((frame, frame))
+            return rectangle,
+        animation = animation.FuncAnimation(fig, update, frames=range(10), blit=True)
+        plt.show()
+
+        # figure=plt.figure(10*6)
+        # x_line=np.arange(0,1000,0.1)
+        # y1_line=np.ones_like(x_line)*20+1.6
+        # y2_line=np.ones_like(x_line)*20-1.6
+        # plt.plot(x_line,y1_line)
+        # plt.plot(x_line,y2_line)
+        # plt.show()
+
+    def clbf(self, ref_path,leader):
+
+        self.ccbf_controller.update_values(self.x, self.y, self.phi, self.u, 0, 0)  # x, y, yaw, vx, vy, omega
+        path2 = ref_path
+        self.ccbf_controller.update_waypoints(path2)
+        accel_clf, steer = self.ccbf_controller.construct_clf_sep(k=params['k'], slack_variable=params['slack_variable'])  # slack=2000
+        front_veh_real_x = leader['x']-self.x - 4.5  # 23.9.25strength改为1.1
+        accel_cbf = self.ccbf_controller.construct_cbf_front_veh(front_veh_real_x, leader['u'],
+                                                            strength=params['strength'],
+                                                            exponen_stiff=params['exponen_stiff'],
+                                                            clf_weight=params['clf_weight'])  # 前方有车时，控制刹车的控制量
+        # accel_final=accel_clf if accel_cbf[0]==0 else accel_cbf
+        accel_final = self.ccbf_controller.throttle
+        return accel_final, accel_clf, accel_cbf, steer
+
+    def phisical_model(self, a, steer):
+        self.phi = 1 / 8 * np.float(steer)
+        self.x = self.x + self.u * np.cos(self.phi) * self.t_step
+        self.y = self.y + self.u * np.sin(self.phi) * self.t_step
+        self.u = np.clip(self.u + np.float(a) * np.cos(self.phi),0,30)
+
+
+
 if __name__=='__main__':
     import numpy as np
     import csv
+    import math
+    import matplotlib.pyplot as plt
+    params=dict(
+        k=5,    #for clf
+        slack_variable=0.3,     #for clf
+        clf_weight=0.1,
+        strength=10,    #for cbf
+        exponen_stiff=0.2,   #for cbf
+        v_desir=20,
+        v_a =2,
+        v_l=0,
+        x_l=10,
+        is_read_csv=False,   #True means plot from csv data,False means plot from realtime simulation data
+        single_test=True
+    )
+
     def file_test():
-        document_name = '../../../projects/csv'
-        csv_name = 'clbf_ctrl_values4_只考虑重构相对速度_改cbf函数c.csv'
+        document_name = '../../../projects/csv'+f'/clbf_{time.strftime("%Y%m%d%H%M%S")}'
+        document_name_read = '../../../projects/csv/clbf_20231115170631'
+        if not params['is_read_csv']:
+            csv_name = f'clbf_{time.strftime("%Y%m%d%H%M%S")}.csv'
+        else:csv_name='clbf_20231115170631.csv'
+
         from traffic_model.utils.ccbf import  CCBFOption, VehicleSpec
         ccbf_controller = CCBF_Controller(VehicleSpec())
         (P1, P2, P3, P4, P5, P6) = CCBFOption.weight
@@ -2305,70 +2408,141 @@ if __name__=='__main__':
         def data_save():
             def test_clbf(v_a,x_l,v_l=0):
                 ccbf_controller.update_values(0, 20, 0, v_a, 0,0)#x, y, yaw, vx, vy, omega
-                path2 = [np.arange(0, 20, 0.5),np.ones(40)*20,np.zeros(40),np.ones(40)*15 ]
+                path2 = [np.arange(0, 20, 0.5),np.ones(40)*20+0.5,np.zeros(40),np.ones(40)*params['v_desir'] ]
                 ccbf_controller.update_waypoints(path2)
-                accel_clf = ccbf_controller.construct_clf_sep(k=1,slack_variable=2000)
+                accel_clf,steer = ccbf_controller.construct_clf_sep(k=params['k'],slack_variable=params['slack_variable'])#slack=2000
                 car_leader=dict(x=x_l,y=20)
                 front_veh_real_x = car_leader['x'] -4.5     #23.9.25strength改为1.1
-                accel_cbf = ccbf_controller.construct_cbf_front_veh(front_veh_real_x,v_l,strength = 20, exponen_stiff = 0.2)  # 前方有车时，控制刹车的控制量
+                accel_cbf = ccbf_controller.construct_cbf_front_veh(front_veh_real_x,v_l,strength = params['strength'], exponen_stiff = params['exponen_stiff'],clf_weight=params['clf_weight'])  # 前方有车时，控制刹车的控制量
                 # accel_final=accel_clf if accel_cbf[0]==0 else accel_cbf
                 accel_final=ccbf_controller.throttle
-                print(f'accel_cbf:{accel_final}')
-                return accel_final,accel_clf,accel_cbf
-            v_a_list = np.arange(2, 18, 2)
-            v_l_list = np.arange(2, 18, 2)
-            x_list = np.arange(2, 34, 2)
-            acc_list=[]
+                print(f'accel_final:{accel_final}')
+                return accel_final,accel_clf,accel_cbf,steer
+            if params['single_test']:
+                accel_final, accel_clf, accel_cbf, steer = test_clbf(params['v_a'], params['x_l'], params['v_l'])
+                print('='*100)
+                print('v_a:{},v_l:{},x_l:{},acc:{:.2f},real_dis:{:.2f},rel_v:{},acc_clf:{:.2f},acc_cbf:{:.2f},steer:{}'.format(
+                    params['v_a'], params['v_l'],params['x_l'] ,accel_final[0],params['x_l']-4.5,params['v_a']-params['v_l'],accel_clf[0],accel_cbf[0],steer[0]))
+            else:
+                v_a_list = np.arange(0, 22, 2)
+                v_l_list = np.arange(0, 32, 2)
+                x_list = np.arange(6.5, 36.5, 2)
+                # v_a_list = np.arange(10, 12, 2)
+                # v_l_list = np.arange(10, 14, 2)
+                # x_list = np.arange(6.5, 14.5, 2)
+                acc_list=[]
 
-            for v_a in v_a_list:
-                # for v_l in v_l_list:
-                #     for x_rel in x_list:
-                for x_l in x_list:
+                for v_a in v_a_list:
                     for v_l in v_l_list:
-                        accel_final,accel_clf,accel_cbf=test_clbf(v_a,x_l,v_l)
-                        # acc_dict={'v_a': v_a,  'x_rel': x_rel,'v_l': v_l, 'accel_final': accel_final,'accel_clf': accel_clf,'accel_cbf': accel_cbf}
-                        acc_list.append([v_a,x_l,v_l,accel_final[0],x_l-4.5,accel_clf,accel_cbf])          #[v_a,v_l,x_rel,accel_cbf]
+                        for x_l in x_list:
+                    # for x_l in x_list:
+                    #     for v_l in v_l_list:
+                            accel_final,accel_clf,accel_cbf,steer=test_clbf(v_a,x_l,v_l)
+                            # acc_dict={'v_a': v_a,  'x_rel': x_rel,'v_l': v_l, 'accel_final': accel_final,'accel_clf': accel_clf,'accel_cbf': accel_cbf}
+                            acc_list.append([v_a,x_l,v_l,accel_final[0],x_l-4.5,v_a-v_l,accel_clf,accel_cbf,steer])          #[v_a,v_l,x_rel,accel_cbf]
 
+                if os.path.exists(document_name):
+                    print("文件存在")
+                else:
+                    os.makedirs(document_name)
+                    print("文件不存在,创建成功")
 
-            # os.makedirs(document_name)
-            if True:
-                with open(os.path.join(document_name, csv_name), mode='w', newline='') as file:
-                    writer = csv.writer(file)
-                    writer.writerow(['v_a','x_rel','v_l','acc','x_real','acc_clf','acc_cbf'])        #['v_a','x_real','acc']
-                    writer.writerows(acc_list)
-            return acc_list
-        def plot_values(acc_list=[]):
-            import matplotlib.pyplot as plt
+                if True:
+                    import json
+                    with open(os.path.join(document_name, csv_name), mode='w', newline='') as file:
+                        writer = csv.writer(file)
+                        writer.writerow(['v_a','x_rel','v_l','acc','x_real','v_rel','acc_clf','acc_cbf','steer'])        #['v_a','x_real','acc']
+                        writer.writerows(acc_list)
+                    with open(os.path.join(document_name, f'{time.strftime("%Y%m%d%H%M")}_config.json'), mode='w') as fn:
+                        json.dump(params,fn)
+                return acc_list
+        def plot_values(acc_list=[],v_a=params['v_a']):
+
             plt.rcParams['font.sans-serif'] = ['SimHei']  # 指定默认字体
             plt.rcParams['axes.unicode_minus'] = False  # 解决保存图像是负号'-'显示为方块的问题
+
             def read_csv():
-                with open(os.path.join(document_name, csv_name), mode='r') as file:
+                with open(os.path.join(document_name_read, csv_name), mode='r') as file:
                     data=csv.reader(file)
                     data_mat=np.array([row for row in data][1:]).T
                     return data_mat
             def from_local():
                 return np.array(acc_list).T
                 print(acc_list[:6])
-            acc_mat=read_csv()
-            fig=plt.figure(figsize=(6,6))
+            acc_mat=read_csv() if params['is_read_csv'] else from_local()
+            # acc_mat = read_csv()
+            fig=plt.figure(figsize=(10,6))
+            colors = plt.cm.get_cmap('rainbow', 16)
+            # color = plt.cm.Set3(i)
+            c = np.random.rand(16, 3)
+            bias, interval = int(15* 16 * (v_a)/2), 15 #15*16*10,15
 
             def plot_l():
-                plt.scatter(acc_mat[1][:16],acc_mat[3][:16],label='相对距离关系')
-                plt.xlabel('相对距离 [m]')
+                for i in range(16):
+                    plt.plot(acc_mat[4][bias+interval*i:bias+interval*(i+1)],[np.clip(float(item),-7,2.5) for item in acc_mat[3]][bias+interval*i:bias+interval*(i+1)],label=f'相对速度为{float(acc_mat[5][bias+interval*i])}m/s',color=colors(i))
+                    plt.xlabel('相对距离 [m]')
+
             def plot_v():
                 for i in range(10):
-                    plt.plot(acc_mat[2][8*i:8*(i+1)], [float(item) for item in acc_mat[3]][8*i:8*(i+1)],label=f'相对速度关系_车距为{(i+1)*2}m,自车速度为{acc_mat[0][8*i]}m/s')
+                    plt.plot(acc_mat[2][8*i:8*(i+1)], [np.clip(float(item),-7,2.5) for item in acc_mat[3]][8*i:8*(i+1)],label=f'相对速度关系_车距为{acc_mat[4][8*i]}m,自车速度为{acc_mat[0][8*i]}m/s')
                     plt.xlabel('前车速度[m/s]')
-            plot_v()
+            plot_l()
             plt.ylabel('加速度 [m/s^2]')
+            plt.text(0, 1.5, f'自车速度：{acc_mat[0][bias]}', fontsize=12, color='red')
             plt.legend()
-            jpg_name=csv_name.split('.')[0]+'.jpg'
-            plt.grid()
-            plt.savefig(os.path.join(document_name,jpg_name))
-            plt.show()
 
-        # acc_list=data_save()
-        plot_values()
+            jpg_name=csv_name.split('.')[0]+f'_{v_a}_'+'.jpg'
+            plt.grid()
+            if params['is_read_csv']:plt.savefig(os.path.join(document_name_read,jpg_name))
+            else:plt.savefig(os.path.join(document_name,jpg_name))
+            plt.show()
+        def plot_values_single(acc_list=[],v_a=params['v_a']):
+            ...
+
+        if not params['is_read_csv']:
+            acc_list=data_save()
+            if not params['single_test']:plot_values(acc_list)
+        else:plot_values()
+
+    def run():
+        import matplotlib.patches as patches
+        # Initialize an empty plot
+        # plt.ion()  # Turn on interactive mode
+        veh_list=[]
+        for i in range(300):
+            if i<1:
+                veh1 = veh(0, 20, 5, 0)
+                veh_list.append(veh1)
+                # veh_list.append(veh2)
+                fig,ax = plt.subplots(figsize=(25,5))
+            for veh_ in veh_list:
+                leader = dict(x=300, y=20, phi=0, u=0)
+                veh_.update(leader)
+                print('='*100)
+                print(i)
+                # Update the plot dynamically (replace this with your data update logic)
+                # Refresh the current figure
+                x = veh_.x
+                y = veh_.y
+                rect_angle=veh_.phi*180/math.pi
+
+                ax.clear()
+                # rectangle = plt.Rectangle((x-2, y-0.5), 4, 1, fc='b',fill=False)  # Initial rectangle at (0,0) with width 1 and height 1
+                rect_width, rect_height =4,1
+                # Create a rectangle patch
+                rectangle = patches.Rectangle((x-0.5*rect_width, y-0.5*rect_height), rect_width, rect_height, angle=rect_angle, edgecolor='b',facecolor='none',fill=False)
+                rectangle_l= patches.Rectangle((leader['x']-0.5*rect_width, leader['y']-0.5*rect_height), rect_width, rect_height, angle=0, edgecolor='r',facecolor='r',fill=True)
+                ax.add_patch(rectangle)
+                ax.add_patch(rectangle_l)
+                ax.plot(veh_.ref_path_short[0],veh_.ref_path_short[1],'--r')
+                ax.set_xlim(0,320)
+                # ax.set_autoscale_on(True)
+                ax.set_ylim(5,35)
+                # 显示更新后的图形
+                plt.pause(0.01)  # 暂停一小段时间，使图形有足够时间显示
+        plt.show()
+            # veh1.render()
+    # run()
     file_test()
 
 
