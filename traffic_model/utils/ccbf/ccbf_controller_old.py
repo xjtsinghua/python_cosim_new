@@ -24,7 +24,7 @@ from matplotlib import animation
 import numpy as np
 # from bicyclemodel import LinearBicycleModel
 
-from traffic_model.utils.ccbf.obstacle import Obstacle
+from traffic_model.utils.ccbf.obstacle_old import Obstacle
 from traffic_model.utils.ccbf import VehicleSpec
 
 Rw = 0.325       #rolling radius of drive wheel, m
@@ -83,7 +83,7 @@ def find_closest_point(waypoints, current_x, current_y):
 
 
 class CCBF_Controller(object):
-    def __init__(self, vehicle_spec:VehicleSpec, dt=0.1, k=3.5):#k=1.0
+    def __init__(self, vehicle_spec:VehicleSpec, dt=0.1):#k=1.0
         self._current_x = 0
         self._current_y = 0
         self._current_yaw = 0
@@ -163,8 +163,8 @@ class CCBF_Controller(object):
         self.b_positive_obs4 = None
 
         # exponential parameter
-        self.k = k
-        self.slack_variable = 2 #slack_variable =2.0
+        self.k = 5
+        self.slack_variable = 0.3 #slack_variable =2.0
 
         self.h = 0
 
@@ -589,7 +589,7 @@ class CCBF_Controller(object):
 
     # Lyapunov Controller / testing code (separately calculate input for rel1 and rel2, then add input)
     #10.13测试（1,2000）
-    def construct_clf_sep(self,k=5,slack_variable=0.3):#3.5,1.5
+    def construct_clf_sep(self,k=3.5,slack_variable=0.1):#3.5,1.5,(5.0.3)
         # slack_variable = 0.3
         # how about connect d_safe with velocity?
         self.k = k    #default:k = 1,0.5,3
@@ -601,13 +601,13 @@ class CCBF_Controller(object):
         self.closest_index = min(closest_index,39)
         print('closest_index:',closest_index)
 
-        lateral_error = (self._current_x-self._waypoints[0][self.closest_index+1])*(-sin(self._waypoints[2][self.closest_index+1])) + ((self._current_y-self._waypoints[1][self.closest_index+1]))*cos(self._waypoints[2][self.closest_index+1]) 
-        
+        lateral_error = (self._current_x-self._waypoints[0][self.closest_index+1])*(-sin(self._waypoints[2][self.closest_index+1])) + ((self._current_y-self._waypoints[1][self.closest_index+1]))*cos(self._waypoints[2][self.closest_index+1])*1.0
+        lateral_error=float(lateral_error)
         # set reference x,y
         x_ref_n = self._waypoints[0][self.closest_index+1]
         #todo
         y_ref_n = self._current_y - lateral_error # transform reference y for this code.
-        print('!!!lateral error verification!!! y_ref_n: ', y_ref_n, ', current_y: ', self._current_y, ', lateral_error: ', lateral_error)
+        print(f'!!!lateral error verification!!! y_ref_n: {y_ref_n:.2f},  current_y: {self._current_y:.2f} , lateral_error: {lateral_error:.2f}' )
         
         # yaw transformation
         # yaw_path = np.arctan2(waypoints[-1][1] - waypoints[0][1], waypoints[-1][0] - waypoints[0][0])
@@ -623,10 +623,9 @@ class CCBF_Controller(object):
         self.yaw_path = yaw_path
         # TODO. need to change this as the yaw path in each point
         
-        print('(CLF ego) x: ', self._current_x, ', y: ', self._current_y, ', phi: ', self._current_yaw, ', vx: ', self._current_vx, ', vy: ', self._current_vy)
-        print('(CLF reference) x:', self._waypoints[0][self.closest_index+1], ', y:', self._waypoints[1][self.closest_index+1], ', phi:', self._waypoints[2][self.closest_index+1], ', vx:', self._waypoints[3][self.closest_index+1], ', vy:', 0)
-        print('(CLF reference edited) x:', x_ref_n, ', y:', y_ref_n, ', phi:', yaw_path, ', vx:', self._waypoints[3][self.closest_index+1], ', vy:', 0)
-
+        print(f'(CLF ego) x:  {self._current_x:.2f},  y:  {self._current_y:.2f},  phi:  {self._current_yaw:.2f},  vx:  {self._current_vx:.2f},  vy:  {self._current_vy:.2f}')
+        print(f'(CLF reference) x: {self._waypoints[0][self.closest_index + 1]:.2f} y: {self._waypoints[1][self.closest_index + 1]:.2f}, phi: {self._waypoints[2][self.closest_index + 1]:.2f},  vx: {self._waypoints[3][self.closest_index + 1]:.2f},  vy: 0')
+        print(f'(CLF reference edited) x: {x_ref_n:.2f},  y: {y_ref_n:.2f},  phi: {yaw_path:.2f},  vx: {self._waypoints[3][self.closest_index + 1]:.2f},  vy: 0')
 
         # calculate the stanley control expect_steer (for the lateral control)
 
@@ -677,14 +676,16 @@ class CCBF_Controller(object):
 
 
             x,y,yaw,u,v,omega   = coord.coord_functions()
-
+            #状态方程的x向量
             e_x1,e_x2,e_x3,e_x4,e_x5,e_x6 = coord.base_vectors()
-
+            #针对速度偏差
             V1 = self.P4*(u-u_ref)**2 + self.P5*(v-v_ref)**2 + self.P6*(omega-omega_ref)**2
             # V1 = (self.P1 * (x - x_ref) + self.P4 * (u - u_ref)) ** 2 + (
             #             self.P2 * (y - y_ref) + self.P5 * (v - v_ref)) ** 2 + (
             #                  self.P3 * (yaw - yaw_ref) + self.P6 * (omega - omega_ref)) ** 2\
             #      + (self.P3 * (yaw - yaw_ref) + self.P5 * (v - v_ref)) ** 2
+            #针对转角偏差
+
             V2 = self.P1*(x-x_ref)**2 + self.P2*(y-y_ref)**2 + self.P3*(yaw-yaw_ref)**2
 
 
@@ -743,7 +744,7 @@ class CCBF_Controller(object):
 
             LgVTLgV2_new = sympy.transpose(LgV2_new)*LgV2_new
             bTbV2_new = LgVTLgV2_new[0]
-            self.clf_btbV2_new = lambdify([x, y, yaw, u, v, omega, x_ref, y_ref, yaw_ref, u_ref, v_ref, omega_ref], bTbV2_new, 'numpy')
+            # self.clf_btbV2_new = lambdify([x, y, yaw, u, v, omega, x_ref, y_ref, yaw_ref, u_ref, v_ref, omega_ref], bTbV2_new, 'numpy')
             input_u2 = -((LfV2_new + self.k*V2_new)/(self.slack_variable + bTbV2_new))*LgV2_new
             if (input_u1 == nan):
                 input_u = input_u2
@@ -793,13 +794,14 @@ class CCBF_Controller(object):
         # input_val1 = self.input_u1(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
         # input_val2 = self.input_u2(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
         if self.clf_control_law is not None:
-            input_val_com=self.clf_control_law(self._current_x, self._current_y, self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
+            scale=4
+            input_val_com=self.clf_control_law(self._current_x, self._current_y, scale*self._current_yaw, self._current_vx, self._current_vy, self._current_omega, self.x_ref, self.y_ref, scale*self.yaw_ref, self.u_ref, self.v_ref, self.omega_ref)
         else:
             input_val_com=[[],[]]
         # print(f'input_val1:{input_val1},\n input_val2:{input_val2},\n input_u_com:{input_val_com}')
-        print('longitudinal error: ', self._current_x - self.x_ref)
-        print('lateral error: ', self._current_y - self.y_ref)
-        print("yaw error: ", self._current_yaw - self.yaw_ref)
+        print(f'longitudinal error:  {self._current_x - self.x_ref:.2f}')
+        print(f'lateral error:  {self._current_y - self.y_ref:.2f}')
+        print(f'yaw error:  {self._current_yaw - self.yaw_ref:.2f}')
         # print('***********input_val:', input_val)
         end_lambdify_eval = time.time()
         # print('*********time for lambdify function: ', end_lambdify_eval-start_lambdify_eval)
@@ -1592,13 +1594,13 @@ class CCBF_Controller(object):
 
     # log and exponential version
     #strength越大，幅值越大，exponen_stiff越大，图像越平滑,#100,1.5,可用(10,0.7),(100,0.8),9.25测试(100,0.3),(30,0.3),(40,0.3)btb+0.1,10.13(20,0.2)
-    def construct_cbf_front_veh(self, x_max_n,v_l=0, strength = 10, exponen_stiff = 0.2,clf_weight=0.08, type='max'):
+    def construct_cbf_front_veh(self, x_max_n,v_l=0, strength = 2, exponen_stiff = 0.2,clf_weight=0.1, type='max'):
         # vehicle width and height
         throttle,steer=0,0
         # self.update_desired_speed()
         width = 4.5
         height = 2.0
-        k=1
+        k=3
         self.exponen_stiff = exponen_stiff
         self.cbf_on = False
 
@@ -1649,7 +1651,7 @@ class CCBF_Controller(object):
             LfLgV = sympy.Matrix([LfLg1V, LfLg2V])
 
             LgVTLgV = sympy.transpose(LfLgV)*LfLgV
-            bTb = LgVTLgV[0]+0.1*self.slack_variable    #9.25新加0.1,防止出现奇点，btb不能接近0，加一个常数0.5左右的值
+            bTb = LgVTLgV[0]+self.slack_variable  #todo,去除‘0.1*’    #9.25新加0.1,防止出现奇点，btb不能接近0，加一个常数0.5左右的值
             self.cbf_col_avoid_btb = lambdify([x, y, yaw, u, v, omega, x_max], bTb, 'numpy')
             # if bTb.subs([(x, self._current_x), (y, self._current_y),(yaw, self._current_yaw),(u, self._current_vx), (v, self._current_vy), (omega, self._current_omega), (x_obs, self.x_obs),(y_obs, self.y_obs)]).evalf(10) <= 0.01:
             #     return [0,0]
@@ -1679,7 +1681,7 @@ class CCBF_Controller(object):
         if np.abs(grad1_h)<=8e-3:#8e-2
             input_val = [[0],[0]]
             throttle = input_val[0]
-            print(f"grad_h:{grad_h} ,grad LfV:{grad1_h},h value:{h_value}")
+            print(f"grad_h:{grad_h:.2f} ,grad LfV:{grad1_h:.2f},h value:{h_value:.2f}")
             self.cbf_on = False
         if True:
         # else:
@@ -1688,11 +1690,13 @@ class CCBF_Controller(object):
             end_lambdify_eval = time.time()
             print(f'***********input_val:{input_val}')
             print(f'*********time for lambdify function: {end_lambdify_eval-start_lambdify_eval}' )
-            print("grad_h: ", grad_h,',grad LfV:', grad1_h,",h value: ", h_value)
+            print(f"grad_h:{grad_h:.2f} ,grad LfV:{grad1_h:.2f},h value:{h_value:.2f}")
 
-            self.throttle_cbf=min(input_val[0],0)
+            self.throttle_cbf=min(input_val[0],np.array([0]))
             # try:self.throttle=round(x_max_n/30,2)*self.throttle_clf + self.throttle_cbf
-            try: self.throttle = min(round(1/np.exp(clf_weight*(30-x_max_n)), 2),1) * self.throttle_clf + self.throttle_cbf
+            try:
+                thita=min(round(1/np.exp(clf_weight*(30-x_max_n)), 2),1)
+                self.throttle = thita * self.throttle_clf + (1-thita)*self.throttle_cbf
             except Exception:print(Exception,self.throttle_clf,x_max_n)
             # self.steer = np.fmax(np.fmin(input_val[1], max_steer), min_steer)
             # self.steer = input_val[1] # 차선책
@@ -2304,7 +2308,7 @@ class veh():
         self.u = u
         self.phi = phi
         self.t_step = 0.1
-        self.target_v=15
+        self.target_v=10
         from traffic_model.utils.ccbf import CCBFOption, VehicleSpec
         self.ref_path_short=[]
         self.ccbf_controller = CCBF_Controller(VehicleSpec())
@@ -2312,7 +2316,10 @@ class veh():
         self.ccbf_controller.update_lyapunov_parameter(P1, P2, P3, P4, P5, P6)
 
     def update(self,leader):
-        ref_path = [np.arange(0, 800, 0.5), np.ones(1600) * 20]
+
+        if abs(leader['x']-self.x)<35:ref_path = [np.arange(0, 800, 0.5), np.ones(1600) * 20+3]
+        else:ref_path = [np.arange(0, 800, 0.5), np.ones(1600) * 20]
+        if abs(np.average(ref_path[1])-leader['y'])>2 or self.x>leader['x']:leader = {}
         closest_idx=min(range(len(ref_path[0])),key=lambda i:abs(ref_path[0][i]-self.x))
         ref_path_short=[ref_path[0][closest_idx:closest_idx+40],ref_path[1][closest_idx:closest_idx+40],np.zeros(40),np.ones(40)*self.target_v]
         self.ref_path_short=ref_path_short
@@ -2358,8 +2365,9 @@ class veh():
         path2 = ref_path
         self.ccbf_controller.update_waypoints(path2)
         accel_clf, steer = self.ccbf_controller.construct_clf_sep(k=params['k'], slack_variable=params['slack_variable'])  # slack=2000
-        front_veh_real_x = leader['x']-self.x - 4.5  # 23.9.25strength改为1.1
-        accel_cbf = self.ccbf_controller.construct_cbf_front_veh(front_veh_real_x, leader['u'],
+        front_veh_real_x = leader['x']-self.x - 4.5  if leader else 100# 23.9.25strength改为1.1
+
+        accel_cbf = self.ccbf_controller.construct_cbf_front_veh(front_veh_real_x, leader['u'] if leader else 20,
                                                             strength=params['strength'],
                                                             exponen_stiff=params['exponen_stiff'],
                                                             clf_weight=params['clf_weight'])  # 前方有车时，控制刹车的控制量
@@ -2381,15 +2389,18 @@ if __name__=='__main__':
     import math
     import matplotlib.pyplot as plt
     params=dict(
-        k=5,    #for clf
-        slack_variable=0.3,     #for clf
+        k=3.5,    #for clf
+        slack_variable=0.1,     #for clf
+        y_bias=3.0,            #for clf
+        phi_bias=0.0,           #for clf
+
         clf_weight=0.1,
-        strength=10,    #for cbf
+        strength=2,    #for cbf
         exponen_stiff=0.2,   #for cbf
-        v_desir=20,
+        v_desir=3,
         v_a =2,
-        v_l=0,
-        x_l=10,
+        v_l=3,
+        x_l=2,
         is_read_csv=False,   #True means plot from csv data,False means plot from realtime simulation data
         single_test=True
     )
@@ -2407,11 +2418,11 @@ if __name__=='__main__':
         ccbf_controller.update_lyapunov_parameter(P1, P2, P3, P4, P5, P6)
         def data_save():
             def test_clbf(v_a,x_l,v_l=0):
-                ccbf_controller.update_values(0, 20, 0, v_a, 0,0)#x, y, yaw, vx, vy, omega
-                path2 = [np.arange(0, 20, 0.5),np.ones(40)*20+0.5,np.zeros(40),np.ones(40)*params['v_desir'] ]
+                ccbf_controller.update_values(0.0, 20.0, 0.0, v_a, 0,0)#x, y, yaw, vx, vy, omega
+                path2 = [np.arange(0, 20.0, 0.5),np.ones(40)*20.0+params['y_bias'],np.ones(40)*params['phi_bias'],np.ones(40)*params['v_desir'] ]
                 ccbf_controller.update_waypoints(path2)
                 accel_clf,steer = ccbf_controller.construct_clf_sep(k=params['k'],slack_variable=params['slack_variable'])#slack=2000
-                car_leader=dict(x=x_l,y=20)
+                car_leader=dict(x=x_l,y=20.0)
                 front_veh_real_x = car_leader['x'] -4.5     #23.9.25strength改为1.1
                 accel_cbf = ccbf_controller.construct_cbf_front_veh(front_veh_real_x,v_l,strength = params['strength'], exponen_stiff = params['exponen_stiff'],clf_weight=params['clf_weight'])  # 前方有车时，控制刹车的控制量
                 # accel_final=accel_clf if accel_cbf[0]==0 else accel_cbf
@@ -2424,8 +2435,8 @@ if __name__=='__main__':
                 print('v_a:{},v_l:{},x_l:{},acc:{:.2f},real_dis:{:.2f},rel_v:{},acc_clf:{:.2f},acc_cbf:{:.2f},steer:{}'.format(
                     params['v_a'], params['v_l'],params['x_l'] ,accel_final[0],params['x_l']-4.5,params['v_a']-params['v_l'],accel_clf[0],accel_cbf[0],steer[0]))
             else:
-                v_a_list = np.arange(0, 22, 2)
-                v_l_list = np.arange(0, 32, 2)
+                v_a_list = np.arange(0, 22.0, 2)
+                v_l_list = np.arange(0, 32.0, 2)
                 x_list = np.arange(6.5, 36.5, 2)
                 # v_a_list = np.arange(10, 12, 2)
                 # v_l_list = np.arange(10, 14, 2)
@@ -2516,7 +2527,7 @@ if __name__=='__main__':
                 # veh_list.append(veh2)
                 fig,ax = plt.subplots(figsize=(25,5))
             for veh_ in veh_list:
-                leader = dict(x=300, y=20, phi=0, u=0)
+                leader = {'x': 150, 'y': 20, 'u': 0, 'phi': 0}
                 veh_.update(leader)
                 print('='*100)
                 print(i)

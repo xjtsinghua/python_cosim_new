@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 import traffic_model
 from traffic_model.podar import PODAR
 from traffic_model.utils.global_value import global_value
-from traffic_model.utils.ccbf import ccbf_controller, CCBFOption, VehicleSpec
+from traffic_model.utils.ccbf import ccbf_controller_old, CCBFOption, VehicleSpec
 import datetime
 
 @dataclass

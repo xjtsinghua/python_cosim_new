@@ -53,11 +53,11 @@ class CCBFOption:
     # controller.update_lyapunov_parameter(P1, P2, P3, P4, P5, P6)
     weight: tuple = (
         0.0,    # x
-        0.1,    # y =0.1 kim推荐0.3,0.5
-        0.1,  # phi 0.5 0.1
+        0.5,    # y =0.1 kim推荐0.3,0.5
+        3,  # phi 0.5, 0.1, 1
         0.5,    # vx  0.5
         0.1,  # vy  0.2
-        0.5     # omega
+        0.5     # omega 0.5
     )
     weight1:tuple=(0, 1.5, 2.4, 0.8, 0.00382303, 0.00148199)    #(0, 0.8, 3.0, 0.8, 0.01, 0.001)这两组参数是0阶优化得到的，可以二选一
     
